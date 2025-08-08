@@ -123,9 +123,39 @@ function chunkMarkdown(text, maxLen = 1200) {
   return chunks;
 }
 
+// Conversation history limits
+const HISTORY_MAX_MESSAGES = Number(process.env.HISTORY_MAX_MESSAGES || 8); // total messages (user+assistant)
+const HISTORY_CHAR_BUDGET = Number(process.env.HISTORY_CHAR_BUDGET || 6000); // approximate char budget
+
+function sanitizeHistory(raw) {
+  if (!Array.isArray(raw)) return [];
+  const allowedRoles = new Set(['user', 'assistant']);
+  const cleaned = [];
+  for (const m of raw) {
+    if (!m || typeof m !== 'object') continue;
+    const role = String(m.role || '').toLowerCase();
+    const content = typeof m.content === 'string' ? m.content : '';
+    if (!allowedRoles.has(role) || !content) continue;
+    cleaned.push({ role, content });
+  }
+  // Keep only the last N messages
+  let trimmed = cleaned.slice(-HISTORY_MAX_MESSAGES);
+  // Enforce a rough character budget from the end backwards
+  let total = 0;
+  const result = [];
+  for (let i = trimmed.length - 1; i >= 0; i--) {
+    const m = trimmed[i];
+    const len = m.content.length + 20; // include a bit of overhead per message
+    if (total + len > HISTORY_CHAR_BUDGET) break;
+    result.push(m);
+    total += len;
+  }
+  return result.reverse();
+}
+
 app.post('/api/chat', async (req, res) => {
   try {
-    const { query } = req.body || {};
+    const { query, history: rawHistory } = req.body || {};
     if (!query) return res.status(400).json({ ok: false, error: 'Missing query' });
 
     const results = await searchIndex(query, 6);
@@ -146,10 +176,13 @@ app.post('/api/chat', async (req, res) => {
       ? `Context:\n${context}\n\nQuestion: ${query}\n\nInstructions: Use only the context. If missing info, say so. Cite sources using (Source: filename.ext p.N). Respond in Markdown.`
       : `Question: ${query}\n\nRespond in Markdown.`;
 
+    const historyMessages = sanitizeHistory(rawHistory);
+
     const answer = await chatComplete([
       { role: 'system', content: system },
+      ...historyMessages,
       { role: 'user', content: user },
-    ], { temperature: 0.2, max_tokens: 800 });
+    ], { temperature: 0.2, max_tokens: Number(process.env.CHAT_MAX_TOKENS || 2048) });
 
     const chunks = chunkMarkdown(answer, Number(process.env.CHAT_CHUNK_SIZE || 1200));
     res.json({ ok: true, chunks });

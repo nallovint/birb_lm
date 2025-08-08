@@ -5,6 +5,10 @@ const ingestBtn = document.getElementById('ingest-btn');
 const statusEl = document.getElementById('status');
 const providerEl = document.getElementById('provider');
 
+// In-memory conversation history for multi-turn
+// Each item: { role: 'user'|'assistant', content: string }
+const conversationHistory = [];
+
 function addMessage(role, content) {
   const div = document.createElement('div');
   div.className = `msg ${role}`;
@@ -36,29 +40,41 @@ async function ingest() {
 async function send() {
   const q = queryEl.value.trim();
   if (!q) return;
+
+  // Push and display user message
+  conversationHistory.push({ role: 'user', content: q });
   addMessage('user', q);
   queryEl.value = '';
 
-  addMessage('assistant', 'Thinking...');
+  // Placeholder while we wait
+  const spinnerText = 'Thinking...';
+  addMessage('assistant', spinnerText);
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: q }),
+      body: JSON.stringify({ query: q, history: conversationHistory }),
     });
     const data = await res.json();
     // Remove spinner message
     chat.removeChild(chat.lastChild);
     if (data.ok && Array.isArray(data.chunks) && data.chunks.length) {
-      for (const chunk of data.chunks) addMessage('assistant', chunk);
+      const full = data.chunks.join('\n\n');
+      addMessage('assistant', full);
+      // Store assistant reply as a single message in history
+      conversationHistory.push({ role: 'assistant', content: full });
     } else if (!data.ok) {
       addMessage('assistant', data.error || 'Error');
+      conversationHistory.push({ role: 'assistant', content: data.error || 'Error' });
     } else {
       addMessage('assistant', '');
+      conversationHistory.push({ role: 'assistant', content: '' });
     }
   } catch (e) {
     chat.removeChild(chat.lastChild);
-    addMessage('assistant', String(e));
+    const errText = String(e);
+    addMessage('assistant', errText);
+    conversationHistory.push({ role: 'assistant', content: errText });
   }
 }
 

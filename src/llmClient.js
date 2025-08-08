@@ -1,4 +1,13 @@
 import 'dotenv/config';
+import { setGlobalDispatcher, Agent } from 'undici';
+
+// Configure generous HTTP timeouts to accommodate first-time model pulls/loads
+const HEADERS_TIMEOUT_MS = Number(process.env.HEADERS_TIMEOUT_MS || 300000); // 5 min
+const BODY_TIMEOUT_MS =
+  process.env.BODY_TIMEOUT_MS === '0'
+    ? 0
+    : Number(process.env.BODY_TIMEOUT_MS || 0); // 0 = no body timeout
+setGlobalDispatcher(new Agent({ headersTimeout: HEADERS_TIMEOUT_MS, bodyTimeout: BODY_TIMEOUT_MS }));
 
 // Auto-detection and configuration for LLM provider
 // Priority:

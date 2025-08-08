@@ -30,7 +30,7 @@ You can run both the app and a local model via Docker Compose.
 
 ### Quick start
 
-### 1. Edit `.env` and select ONE model (uncomment one), and set GROQ values:
+### 1. Groq (Online mode) Edit `.env` and uncomment `LLM_MODE=groq` and comment out `LLM_MODE=ollama`
 ```bash
 GROQ_API_KEY=<YOUR_GROQ_KEY>
 GROQ_MODEL=llama3-8b-8192 # see information below on how to get groq key and set model
@@ -46,12 +46,30 @@ LLM_MODEL=llama3.2:1b
 # LLM_MODEL=llama3.1:8b   # you can use
 ```
 
+### 1. Ollama (Local mode) Edit `.env` and and uncomment `LLM_MODE=ollama` and comment out `LLM_MODE=groq`
+```bash
+GROQ_API_KEY=<YOUR_GROQ_KEY>
+GROQ_MODEL=llama3-8b-8192 # see information below on how to get groq key and set model
+
+# Choose ONE mode
+LLM_MODE=ollama
+# LLM_MODE=groq
+
+# If using Ollama/local OpenAI-compatible
+LLM_BASE_URL=http://ollama:11434
+# LLM_MODEL=llama3.2:1b # comment this line
+# LLM_MODEL=gemma2:2b    
+LLM_MODEL=llama3.1:8b   # uncomment this line
+```
+
 ### 2. Run
 
 ```bash
 docker compose up -d
-# only required if you are using a local LLM
+# next lines are only required if you are using a local LLM (Ollama)
 docker compose exec ollama ollama pull llama3.1:8b # or another of the models listed above in Part 1
+docker compose up -d --force-recreate app
+
 # open http://localhost:3000
 ```
 ### (This command can also be used if you need to pull a new model)
@@ -65,13 +83,15 @@ If you wish to see progress of this, run the following in a separate terminal wi
 ```bash
 docker compose logs -f app
 ```
+The UI will also show when indexing is complete and how many chunks were indexed. This is an abritrary value and only useful to the program.
 
 ### 4. Go to site
 
-Head to [Link]http://localhost:3000
+Head to [http://localhost:3000](http://localhost:3000)
 
 
-### If you update the model, you need to run
+### If you update the `.env`, you need to run this -
+#### (You will also need to do this if you change the mode (step 1) above from Online -> Local or Local -> Online)
 
 ```bash
 docker compose up -d --force-recreate app
@@ -109,19 +129,5 @@ You can watch the server logs to see indexing progress (e.g., messages like `[bu
 - With Docker Compose:
   ```bash
   docker compose logs -f app
-  # Trigger indexing from the UI (Rebuild index) or via CLI:
-  docker compose exec app node src/ingest.js
   ```
 
-- Local (without Docker):
-  ```bash
-  npm start      # shows logs in the terminal
-  # Or run the ingest script directly:
-  npm run ingest
-  ```
-
-
-
-## Notes
-- For larger corpora or higher performance, swap the JSON store for a vector DB (e.g., SQLite+vss, Qdrant, pgvector).
-- If you change chunking or the embedding model, re-run ingestion.
