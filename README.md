@@ -13,8 +13,6 @@ This project indexes documents from the `docs/` directory and provides a lightwe
 - Node.js 20+ (only if running locally without Docker)
 - Either: a Groq API key, or a local OpenAI-compatible server (e.g., Ollama) running
 
-## Quick start — Docker Compose
-
 ## Supported File Types
 - `.pdf` (extracted via `pdfjs-dist`)
 - `.docx` (via `mammoth`)
@@ -32,12 +30,17 @@ You can run both the app and a local model via Docker Compose.
 
 ### Quick start
 
-### 1. Edit `.env` and select ONE model (uncomment one):
+### 1. Edit `.env` and select ONE model (uncomment one), and set GROQ values:
 ```bash
-LLM_MODE=ollama
-# LLM_MODE=groq # if you are running remotely
-LLM_BASE_URL=http://ollama:11434
+GROQ_API_KEY=<YOUR_GROQ_KEY>
+GROQ_MODEL=llama3-8b-8192 # see information below on how to get groq key and set model
 
+# Choose ONE mode
+# LLM_MODE=ollama
+LLM_MODE=groq
+
+# If using Ollama/local OpenAI-compatible
+LLM_BASE_URL=http://ollama:11434
 LLM_MODEL=llama3.2:1b
 # LLM_MODEL=gemma2:2b     # alternate models
 # LLM_MODEL=llama3.1:8b   # you can use
@@ -48,17 +51,33 @@ LLM_MODEL=llama3.2:1b
 ```bash
 docker compose up -d
 # only required if you are using a local LLM
-docker compose exec ollama ollama pull llama3.1:8b 
+docker compose exec ollama ollama pull llama3.1:8b # or another of the models listed above in Part 1
 # open http://localhost:3000
 ```
 ### (This command can also be used if you need to pull a new model)
 
-### 3. Go to site
+### 3. Library creation
+
+- Copy any PDF, DOCX or TXT files into `docs/`
+- In the web UI, click the `Rebuild` button at the top to index
+
+If you wish to see progress of this, run the following in a separate terminal window:
+```bash
+docker compose logs -f app
+```
+
+### 4. Go to site
 
 Head to [Link]http://localhost:3000
 
 
-## If you have any issues
+### If you update the model, you need to run
+
+```bash
+docker compose up -d --force-recreate app
+```
+
+---------------------
 
 ### Check that Ollama is running, if running locally
 
@@ -101,11 +120,6 @@ You can watch the server logs to see indexing progress (e.g., messages like `[bu
   npm run ingest
   ```
 
-### If you update the model, you need to run
-
-```bash
-docker compose up -d --force-recreate app
-```
 
 
 ## Notes
