@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Notebook-style Chat (Groq)</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📓 Notebook-style Document Chat (Groq)</h1>
+      <div class="controls">
+        <button id="ingest-btn">Rebuild index from docs/</button>
+        <span id="status"></span>
+        <span id="provider" style="margin-left: 1rem; opacity: 0.8;"></span>
+      </div>
+    </header>
+
+    <main>
+      <div id="chat"></div>
+      <div class="input">
+        <textarea id="query" rows="3" placeholder="Ask a question about your documents..."></textarea>
+        <button id="send">Send</button>
+      </div>
+    </main>
+  </div>
+
+  <!-- Markdown renderer and sanitizer -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script>
+    // Configure marked for GitHub-like flavor
+    if (window.marked) {
+      marked.setOptions({ gfm: true, breaks: true });
+    }
+  </script>
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,165 @@
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { chatComplete, DEFAULT_MODEL, getProviderInfo } from './llmClient.js';
+import { searchIndex, buildAndSaveIndex } from './retriever.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: '2mb' }));
+
+// Static UI
+const publicDir = path.resolve(__dirname, '../public');
+app.use(express.static(publicDir));
+
+app.post('/api/ingest', async (req, res) => {
+  try {
+    const dir = process.env.DOCS_DIR || 'docs';
+    const idx = await buildAndSaveIndex(dir);
+    res.json({ ok: true, chunks: idx.items.length });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Provider status for UI
+app.get('/api/status', async (req, res) => {
+  try {
+    const info = await getProviderInfo();
+    res.json({ ok: true, ...info });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+function chunkMarkdown(text, maxLen = 1200) {
+  if (!text) return [];
+
+  // Helper: split into sections by markdown headings, preserving headings
+  function splitByHeadings(md) {
+    const lines = md.split(/\n/);
+    const sections = [];
+    let current = [];
+    for (const line of lines) {
+      if (/^#{1,6}\s+/.test(line)) {
+        if (current.length) sections.push(current.join('\n'));
+        current = [line];
+      } else {
+        current.push(line);
+      }
+    }
+    if (current.length) sections.push(current.join('\n'));
+    return sections.length ? sections : [md];
+  }
+
+  // Helper: split a long block by paragraphs, then sentences, avoiding mid-word cuts
+  function splitBlock(block) {
+    const result = [];
+    const paragraphs = block.split(/\n{2,}/);
+    let buffer = '';
+
+    const flushBuffer = () => {
+      if (buffer) {
+        result.push(buffer);
+        buffer = '';
+      }
+    };
+
+    for (const para of paragraphs) {
+      const candidate = buffer ? `${buffer}\n\n${para}` : para;
+      if (candidate.length <= maxLen) {
+        buffer = candidate;
+        continue;
+      }
+
+      // Paragraph too large for buffer: flush and split paragraph by sentences
+      flushBuffer();
+      const sentences = para.split(/(?<=[.!?])\s+/);
+      let sentenceBuf = '';
+      for (const s of sentences) {
+        const next = sentenceBuf ? `${sentenceBuf} ${s}` : s;
+        if (next.length <= maxLen) {
+          sentenceBuf = next;
+        } else {
+          if (sentenceBuf) result.push(sentenceBuf);
+          if (s.length <= maxLen) {
+            sentenceBuf = s;
+          } else {
+            // Fallback: split long sentence at whitespace boundaries
+            let remaining = s;
+            while (remaining.length > maxLen) {
+              const slice = remaining.slice(0, maxLen + 1);
+              const cut = Math.max(slice.lastIndexOf(' '), slice.lastIndexOf('\n'));
+              const end = cut > 0 ? cut : maxLen;
+              result.push(remaining.slice(0, end));
+              remaining = remaining.slice(end).trimStart();
+            }
+            sentenceBuf = remaining;
+          }
+        }
+      }
+      if (sentenceBuf) result.push(sentenceBuf);
+    }
+
+    if (buffer) result.push(buffer);
+    return result;
+  }
+
+  const sections = splitByHeadings(text);
+  const chunks = [];
+  for (const section of sections) {
+    if (section.length <= maxLen) {
+      chunks.push(section);
+    } else {
+      chunks.push(...splitBlock(section));
+    }
+  }
+  return chunks;
+}
+
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { query } = req.body || {};
+    if (!query) return res.status(400).json({ ok: false, error: 'Missing query' });
+
+    const results = await searchIndex(query, 6);
+
+    const contextLines = results.map(({ item }) => {
+      const name = path.basename(item.sourcePath);
+      const pageLabel = item.pageNumber ? ` p.${item.pageNumber}` : '';
+      const snippet = item.text.slice(0, 1000);
+      return `[src=${name}${pageLabel}#${item.chunkId}] ${snippet}`;
+    });
+
+    const context = contextLines.join('\n\n');
+
+    const system = `You are an expert research assistant. Answer using ONLY the provided context. If the answer is not in the snippets, say you don't have enough information.
+    Citations: Use exactly the format (Source: filename.ext p.N). Do not include URLs or paths in citations. Do not invent sources.
+    Respond in Markdown with clear headings, lists, and code blocks when helpful. Be concise.`;
+    const user = contextLines.length
+      ? `Context:\n${context}\n\nQuestion: ${query}\n\nInstructions: Use only the context. If missing info, say so. Cite sources using (Source: filename.ext p.N). Respond in Markdown.`
+      : `Question: ${query}\n\nRespond in Markdown.`;
+
+    const answer = await chatComplete([
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ], { temperature: 0.2, max_tokens: 800 });
+
+    const chunks = chunkMarkdown(answer, Number(process.env.CHAT_CHUNK_SIZE || 1200));
+    res.json({ ok: true, chunks });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => {
+  console.log(`Server listening on http://localhost:${port}`);
+});

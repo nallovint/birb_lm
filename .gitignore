@@ -1,0 +1,19 @@
+# Python/old
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+.env
+.DS_Store
+
+# Storage and docs
+.storage/
+storage/*
+!storage/.gitkeep
+docs/*
+!docs/.gitkeep
+
+# Misc
+*.faiss
+vectors.npy

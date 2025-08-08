@@ -1,0 +1,36 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      ollama:
+        condition: service_healthy
+    env_file:
+      - ./.env
+    environment:
+      # Optional tunables. LLM provider is auto-detected.
+      PORT: 3000
+      DOCS_DIR: /app/docs
+      INDEX_DIR: /app/storage
+    volumes:
+      - ./docs:/app/docs
+      - ./storage:/app/storage
+    ports:
+      - "3000:3000"
+
+volumes:
+  ollama:
+
+
