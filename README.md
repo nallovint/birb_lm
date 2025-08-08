@@ -30,24 +30,37 @@ Note: The app can auto-detect a local OpenAI-compatible server (Ollama) or use G
 
 You can run both the app and a local model via Docker Compose.
 
-### Quick start — Local Ollama (recommended)
+### Quick start
+
+### 1. Edit `.env` and select ONE model (uncomment one):
 ```bash
-mkdir -p docs storage
+LLM_MODE=ollama
+# LLM_MODE=groq # if you are running remotely
+LLM_BASE_URL=http://ollama:11434
+
+LLM_MODEL=llama3.2:1b
+# LLM_MODEL=gemma2:2b     # alternate models
+# LLM_MODEL=llama3.1:8b   # you can use
+```
+
+### 2. Run
+
+```bash
 docker compose up -d
-docker compose exec ollama ollama pull llama3.1:8b
+# only required if you are using a local LLM
+docker compose exec ollama ollama pull llama3.1:8b 
 # open http://localhost:3000
 ```
+### (This command can also be used if you need to pull a new model)
 
-### Quick start — Groq (no Ollama)
-```bash
-mkdir -p docs storage
-export GROQ_API_KEY=sk_...
-docker compose up -d --build
-# open http://localhost:3000
-```
+### 3. Go to site
+
+Head to [Link]http://localhost:3000
 
 
-### Check that Ollama is running
+## If you have any issues
+
+### Check that Ollama is running, if running locally
 
 When using Docker Compose (bundled `ollama` service):
 
@@ -65,14 +78,6 @@ curl -s http://localhost:11434/api/version | jq .
 docker compose exec ollama ollama --version
 docker compose exec ollama ollama list
 docker compose exec ollama curl -s http://localhost:11434/v1/models | jq .
-```
-
-If you run Ollama directly on your host (not via Compose):
-
-```bash
-curl -s http://localhost:11434/api/version | jq .
-ollama --version
-ps aux | grep ollama
 ```
 
 In the app UI, the header badge shows the active provider. It will display
@@ -96,42 +101,8 @@ You can watch the server logs to see indexing progress (e.g., messages like `[bu
   npm run ingest
   ```
 
-### Choose a model in .env and run (Ollama)
+### If you update the model, you need to run
 
-1) Edit `.env` and select ONE model (uncomment one):
-```
-LLM_MODE=ollama
-LLM_BASE_URL=http://ollama:11434
-
-LLM_MODEL=llama3.2:1b
-# LLM_MODEL=gemma2:2b
-# LLM_MODEL=llama3.1:8b
-```
-
-2) Pull the chosen model in the Ollama container:
-```bash
-docker compose exec ollama ollama pull <model>
-# or explicitly: docker compose exec ollama ollama pull llama3.2:1b
-```
-
-3) Recreate the app to pick up `.env`:
-```bash
-docker compose up -d --force-recreate app
-```
-
-4) Verify the app is using your model:
-```bash
-curl -s http://localhost:3000/api/status | jq .
-# expect: provider "openai-compatible", model "llama3.2:1b"
-```
-
-### Use Groq instead of Ollama
-```
-LLM_MODE=groq
-GROQ_API_KEY=sk_...
-# Optional: GROQ_MODEL=llama-3.1-8b-instant
-```
-Then:
 ```bash
 docker compose up -d --force-recreate app
 ```
