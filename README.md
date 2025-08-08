@@ -12,6 +12,7 @@ This project indexes documents from the `docs/` directory and provides a lightwe
 ## Requirements
 - Node.js 20+ (only if running locally without Docker)
 - Either: a Groq API key, or a local OpenAI-compatible server (e.g., Ollama) running
+- Docker Desktop to be installed on the machine - follow your relevant instructions at [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 
 ## Supported File Types
 - `.pdf` (extracted via `pdfjs-dist`)
