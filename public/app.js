@@ -4,6 +4,7 @@ const sendBtn = document.getElementById('send');
 const ingestBtn = document.getElementById('ingest-btn');
 const statusEl = document.getElementById('status');
 const providerEl = document.getElementById('provider');
+let isSending = false;
 
 // In-memory conversation history for multi-turn
 // Each item: { role: 'user'|'assistant', content: string }
@@ -38,6 +39,7 @@ async function ingest() {
 }
 
 async function send() {
+  if (isSending) return;
   const q = queryEl.value.trim();
   if (!q) return;
 
@@ -46,35 +48,76 @@ async function send() {
   addMessage('user', q);
   queryEl.value = '';
 
-  // Placeholder while we wait
-  const spinnerText = 'Thinking...';
-  addMessage('assistant', spinnerText);
+  // Lock UI
+  isSending = true;
+  sendBtn.disabled = true;
+
+  // Streaming via SSE
+  const holder = document.createElement('div');
+  holder.className = 'msg assistant';
+  holder.textContent = 'Thinking...';
+  chat.appendChild(holder);
+  chat.scrollTop = chat.scrollHeight;
+
   try {
-    const res = await fetch('/api/chat', {
+    const res = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: q, history: conversationHistory }),
     });
-    const data = await res.json();
-    // Remove spinner message
-    chat.removeChild(chat.lastChild);
-    if (data.ok && Array.isArray(data.chunks) && data.chunks.length) {
-      const full = data.chunks.join('\n\n');
-      addMessage('assistant', full);
-      // Store assistant reply as a single message in history
-      conversationHistory.push({ role: 'assistant', content: full });
-    } else if (!data.ok) {
-      addMessage('assistant', data.error || 'Error');
-      conversationHistory.push({ role: 'assistant', content: data.error || 'Error' });
-    } else {
-      addMessage('assistant', '');
-      conversationHistory.push({ role: 'assistant', content: '' });
+    if (!res.ok || !res.body) throw new Error('Streaming not available');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let acc = '';
+    holder.textContent = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? '';
+      let event = null;
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('event:')) {
+          event = trimmed.slice(6).trim();
+          continue;
+        }
+        if (trimmed.startsWith('data:')) {
+          const dataStr = trimmed.slice(5).trim();
+          try {
+            const evt = JSON.parse(dataStr);
+            if (event === 'delta' && evt.text) {
+              acc += evt.text;
+              if (window.marked && window.DOMPurify) {
+                const html = marked.parse(acc);
+                holder.innerHTML = DOMPurify.sanitize(html);
+              } else {
+                holder.textContent = acc;
+              }
+              chat.scrollTop = chat.scrollHeight;
+            } else if (event === 'done') {
+              // Store assistant reply in history
+              conversationHistory.push({ role: 'assistant', content: acc });
+            } else if (event === 'error') {
+              const message = evt.error || 'Error';
+              holder.textContent = message;
+              conversationHistory.push({ role: 'assistant', content: message });
+            }
+          } catch {
+            // ignore JSON parse errors
+          }
+        }
+      }
     }
   } catch (e) {
-    chat.removeChild(chat.lastChild);
-    const errText = String(e);
-    addMessage('assistant', errText);
-    conversationHistory.push({ role: 'assistant', content: errText });
+    holder.textContent = String(e);
+    conversationHistory.push({ role: 'assistant', content: String(e) });
+  } finally {
+    isSending = false;
+    sendBtn.disabled = false;
   }
 }
 

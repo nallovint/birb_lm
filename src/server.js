@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chatComplete, DEFAULT_MODEL, getProviderInfo } from './llmClient.js';
+import { chatComplete, DEFAULT_MODEL, getProviderInfo, chatCompleteStream } from './llmClient.js';
 import { searchIndex, buildAndSaveIndex } from './retriever.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -192,6 +192,66 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
+// Streaming chat via SSE
+app.post('/api/chat/stream', async (req, res) => {
+  try {
+    const { query } = req.body || {};
+    if (!query) return res.status(400).json({ ok: false, error: 'Missing query' });
+
+    const results = await searchIndex(query, 6);
+    const contextLines = results.map(({ item }) => {
+      const name = path.basename(item.sourcePath);
+      const pageLabel = item.pageNumber ? ` p.${item.pageNumber}` : '';
+      const snippet = item.text.slice(0, 1000);
+      return `[src=${name}${pageLabel}#${item.chunkId}] ${snippet}`;
+    });
+    const context = contextLines.join('\n\n');
+
+    const system = `You are an expert research assistant. Answer using ONLY the provided context. If the answer is not in the snippets, say you don't have enough information.
+    Citations: Use exactly the format (Source: filename.ext p.N). Do not include URLs or paths in citations. Do not invent sources.
+    Respond in Markdown with clear headings, lists, and code blocks when helpful. Be concise.`;
+    const user = contextLines.length
+      ? `Context:\n${context}\n\nQuestion: ${query}\n\nInstructions: Use only the context. If missing info, say so. Cite sources using (Source: filename.ext p.N). Respond in Markdown.`
+      : `Question: ${query}\n\nRespond in Markdown.`;
+
+    // SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    const send = (event, data) => {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
+    // Initial event with context info (optional)
+    send('status', { ok: true, started: true });
+
+    await chatCompleteStream(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      { temperature: 0.2, max_tokens: 800 },
+      (evt) => {
+        if (evt.type === 'delta') send('delta', { text: evt.text });
+        if (evt.type === 'done') send('done', {});
+        if (evt.type === 'error') send('error', { error: evt.error });
+      }
+    );
+
+    res.end();
+  } catch (e) {
+    try {
+      res.write(`event: error\n`);
+      res.write(`data: ${JSON.stringify({ error: String(e) })}\n\n`);
+      res.end();
+    } catch {
+      res.status(500).end();
+    }
+  }
+});
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Server listening on http://localhost:${port}`);

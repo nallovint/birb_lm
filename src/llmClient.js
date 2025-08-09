@@ -172,3 +172,102 @@ export async function getProviderInfo() {
   };
 }
 
+// Streaming chat completion. Yields incremental text via onDelta callback.
+// onDelta(signature) receives: { type: 'delta', text } | { type: 'done' } | { type: 'error', error }
+export async function chatCompleteStream(
+  messages,
+  { model, temperature = 0.2, max_tokens = 800 } = {},
+  onDelta
+) {
+  const provider = await ensureProvider();
+
+  if (provider.type === 'openai-compatible') {
+    const baseUrl = provider.baseUrl;
+    const finalModel = model || PROVIDER_DEFAULTS.openaiCompatibleModel;
+    const apiKey =
+      process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || process.env.GROQ_API_KEY || 'ollama';
+    const url = new URL('/v1/chat/completions', baseUrl).toString();
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: finalModel,
+        messages,
+        temperature,
+        max_tokens,
+        stream: true,
+      }),
+    });
+
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`LLM request failed: ${res.status} ${text}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffered = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffered += decoder.decode(value, { stream: true });
+      const lines = buffered.split(/\r?\n/);
+      buffered = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('data:')) {
+          const dataStr = trimmed.slice(5).trim();
+          if (dataStr === '[DONE]') {
+            onDelta?.({ type: 'done' });
+            return;
+          }
+          try {
+            const json = JSON.parse(dataStr);
+            const delta = json.choices?.[0]?.delta?.content ?? '';
+            if (delta) onDelta?.({ type: 'delta', text: delta });
+          } catch {
+            // ignore parse errors
+          }
+        }
+      }
+    }
+    onDelta?.({ type: 'done' });
+    return;
+  }
+
+  // Groq streaming (best-effort; falls back to non-stream if unsupported)
+  try {
+    const finalModel = model || PROVIDER_DEFAULTS.groqModel;
+    const { default: Groq } = await import('groq-sdk');
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) throw new Error('Missing GROQ_API_KEY');
+    const client = new Groq({ apiKey });
+    const stream = await client.chat.completions.create({
+      model: finalModel,
+      messages,
+      temperature,
+      max_tokens,
+      stream: true,
+    });
+    for await (const part of stream) {
+      const delta = part.choices?.[0]?.delta?.content ?? '';
+      if (delta) onDelta?.({ type: 'delta', text: delta });
+    }
+    onDelta?.({ type: 'done' });
+  } catch (e) {
+    // Fallback to non-stream
+    try {
+      const text = await chatComplete(messages, { model, temperature, max_tokens });
+      if (text) onDelta?.({ type: 'delta', text });
+      onDelta?.({ type: 'done' });
+    } catch (err) {
+      onDelta?.({ type: 'error', error: String(err) });
+    }
+  }
+}
+
