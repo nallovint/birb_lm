@@ -158,7 +158,14 @@ app.post('/api/chat', async (req, res) => {
     const { query, history: rawHistory } = req.body || {};
     if (!query) return res.status(400).json({ ok: false, error: 'Missing query' });
 
-    const results = await searchIndex(query, 6);
+    // Augment retrieval with last assistant answer excerpt (if any)
+    const histForRetrieval = sanitizeHistory(rawHistory);
+    const lastAssistant = histForRetrieval.filter((m) => m.role === 'assistant').slice(-1)[0];
+    const excerptLen = Number(process.env.RETRIEVAL_HISTORY_EXCERPT_CHARS || 800);
+    const assistantExcerpt = lastAssistant ? lastAssistant.content.slice(0, excerptLen) : '';
+    const retrievalQuery = assistantExcerpt ? `${assistantExcerpt} \n\n${query}` : query;
+
+    const results = await searchIndex(retrievalQuery, 6);
 
     const contextLines = results.map(({ item }) => {
       const name = path.basename(item.sourcePath);
@@ -167,7 +174,10 @@ app.post('/api/chat', async (req, res) => {
       return `[src=${name}${pageLabel}#${item.chunkId}] ${snippet}`;
     });
 
-    const context = contextLines.join('\n\n');
+    const historyContext = assistantExcerpt
+      ? `Previous answer excerpt (for context):\n${assistantExcerpt}`
+      : '';
+    const context = [historyContext, ...contextLines].filter(Boolean).join('\n\n');
 
     const system = `You are an expert research assistant. Answer using ONLY the provided context. If the answer is not in the snippets, say you don't have enough information.
     Citations: Use exactly the format (Source: filename.ext p.N). Do not include URLs or paths in citations. Do not invent sources.
@@ -177,6 +187,11 @@ app.post('/api/chat', async (req, res) => {
       : `Question: ${query}\n\nRespond in Markdown.`;
 
     const historyMessages = sanitizeHistory(rawHistory);
+    console.log(`[chat] history messages used: ${historyMessages.length}`);
+    if (historyMessages.length) {
+      const preview = historyMessages.map((m) => `${m.role}: ${m.content.slice(0, 80)}`);
+      console.log(`[chat] history preview:`, preview);
+    }
 
     const answer = await chatComplete([
       { role: 'system', content: system },
@@ -195,17 +210,27 @@ app.post('/api/chat', async (req, res) => {
 // Streaming chat via SSE
 app.post('/api/chat/stream', async (req, res) => {
   try {
-    const { query } = req.body || {};
+    const { query, history: rawHistory } = req.body || {};
     if (!query) return res.status(400).json({ ok: false, error: 'Missing query' });
 
-    const results = await searchIndex(query, 6);
+    // Augment retrieval with last assistant answer excerpt (if any)
+    const histForRetrieval = sanitizeHistory(rawHistory);
+    const lastAssistant = histForRetrieval.filter((m) => m.role === 'assistant').slice(-1)[0];
+    const excerptLen = Number(process.env.RETRIEVAL_HISTORY_EXCERPT_CHARS || 800);
+    const assistantExcerpt = lastAssistant ? lastAssistant.content.slice(0, excerptLen) : '';
+    const retrievalQuery = assistantExcerpt ? `${assistantExcerpt} \n\n${query}` : query;
+
+    const results = await searchIndex(retrievalQuery, 6);
     const contextLines = results.map(({ item }) => {
       const name = path.basename(item.sourcePath);
       const pageLabel = item.pageNumber ? ` p.${item.pageNumber}` : '';
       const snippet = item.text.slice(0, 1000);
       return `[src=${name}${pageLabel}#${item.chunkId}] ${snippet}`;
     });
-    const context = contextLines.join('\n\n');
+    const historyContext = assistantExcerpt
+      ? `Previous answer excerpt (for context):\n${assistantExcerpt}`
+      : '';
+    const context = [historyContext, ...contextLines].filter(Boolean).join('\n\n');
 
     const system = `You are an expert research assistant. Answer using ONLY the provided context. If the answer is not in the snippets, say you don't have enough information.
     Citations: Use exactly the format (Source: filename.ext p.N). Do not include URLs or paths in citations. Do not invent sources.
@@ -228,9 +253,17 @@ app.post('/api/chat/stream', async (req, res) => {
     // Initial event with context info (optional)
     send('status', { ok: true, started: true });
 
+    const historyMessages = sanitizeHistory(rawHistory);
+    console.log(`[chat/stream] history messages used: ${historyMessages.length}`);
+    if (historyMessages.length) {
+      const preview = historyMessages.map((m) => `${m.role}: ${m.content.slice(0, 80)}`);
+      console.log(`[chat/stream] history preview:`, preview);
+    }
+
     await chatCompleteStream(
       [
         { role: 'system', content: system },
+        ...historyMessages,
         { role: 'user', content: user },
       ],
       { temperature: 0.2, max_tokens: 800 },
