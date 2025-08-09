@@ -132,3 +132,19 @@ You can watch the server logs to see indexing progress (e.g., messages like `[bu
   docker compose logs -f app
   ```
 
+### After pulling updates (rebuild)
+
+If you pulled a new version of this project or changed code locally, rebuild the app container:
+
+```bash
+# Quick rebuild and restart
+docker compose up -d --build app
+
+# If issues persist, do a full clean rebuild
+docker compose build --no-cache app
+docker compose up -d --force-recreate app
+
+# Verify
+docker compose logs -f app
+```
+
