@@ -53,7 +53,7 @@ async function send() {
   sendBtn.disabled = true;
 
   // Streaming via SSE
-  const holder = document.createElement('div');
+  let holder = document.createElement('div');
   holder.className = 'msg assistant';
   holder.textContent = 'Thinking...';
   chat.appendChild(holder);
@@ -98,9 +98,21 @@ async function send() {
                 holder.textContent = acc;
               }
               chat.scrollTop = chat.scrollHeight;
-            } else if (event === 'done') {
-              // Store assistant reply in history
+            } else if (event === 'flush') {
+              // finalize current message node and start a new one
               conversationHistory.push({ role: 'assistant', content: acc });
+              acc = '';
+              const newHolder = document.createElement('div');
+              newHolder.className = 'msg assistant';
+              newHolder.textContent = '';
+              chat.appendChild(newHolder);
+              // switch reference to new holder
+              holder = newHolder;
+            } else if (event === 'done') {
+              // Store assistant reply in history if non-empty
+              if (acc && acc.trim().length) {
+                conversationHistory.push({ role: 'assistant', content: acc });
+              }
             } else if (event === 'error') {
               const message = evt.error || 'Error';
               holder.textContent = message;

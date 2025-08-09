@@ -260,16 +260,36 @@ app.post('/api/chat/stream', async (req, res) => {
       console.log(`[chat/stream] history preview:`, preview);
     }
 
+    const chunkLimit = Number(process.env.CHAT_CHUNK_SIZE || 1200);
+    let accForFlush = '';
+    let hasEmittedDelta = false;
+
     await chatCompleteStream(
       [
         { role: 'system', content: system },
         ...historyMessages,
         { role: 'user', content: user },
       ],
-      { temperature: 0.2, max_tokens: 800 },
+      { temperature: 0.2, max_tokens: Number(process.env.CHAT_MAX_TOKENS || 2048) },
       (evt) => {
-        if (evt.type === 'delta') send('delta', { text: evt.text });
-        if (evt.type === 'done') send('done', {});
+        if (evt.type === 'delta') {
+          accForFlush += evt.text || '';
+          send('delta', { text: evt.text });
+          hasEmittedDelta = true;
+          if (
+            accForFlush.length >= chunkLimit &&
+            /[\.!?\n]\s*$/.test(accForFlush)
+          ) {
+            // Signal the client to finalize current message and start a new one
+            send('flush', { done: false });
+            accForFlush = '';
+          }
+        }
+        if (evt.type === 'done') {
+          // If nothing was emitted, still send a minimal delta to keep UI consistent
+          if (!hasEmittedDelta) send('delta', { text: '' });
+          send('done', {});
+        }
         if (evt.type === 'error') send('error', { error: evt.error });
       }
     );
