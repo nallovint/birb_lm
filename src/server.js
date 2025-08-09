@@ -4,7 +4,7 @@ import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chatComplete, DEFAULT_MODEL, getProviderInfo, chatCompleteStream } from './llmClient.js';
-import { searchIndex, buildAndSaveIndex, loadIndex } from './retriever.js';
+import { searchIndex, buildAndSaveIndex, loadIndex, listDocFiles } from './retriever.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,6 +28,19 @@ app.post('/api/ingest', async (req, res) => {
   }
 });
 
+// List available documents for selection
+app.get('/api/docs', async (req, res) => {
+  try {
+    const dir = process.env.DOCS_DIR || 'docs';
+    const files = await listDocFiles(dir);
+    const docs = files.map((abs) => ({ path: abs, name: path.basename(abs) }));
+    res.json({ ok: true, docs });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 // Generate an asynchronous brief summary of the current document corpus
 app.get('/api/summary', async (req, res) => {
   try {
@@ -39,6 +52,7 @@ app.get('/api/summary', async (req, res) => {
 
     const byDoc = new Map();
     for (const item of index.items || []) {
+      // GET version: no filtering; summarize overall corpus
       const key = item.sourcePath;
       if (!byDoc.has(key)) byDoc.set(key, []);
       const arr = byDoc.get(key);
@@ -76,11 +90,57 @@ app.get('/api/summary', async (req, res) => {
   }
 });
 
+// Summary for selected documents
+app.post('/api/summary', async (req, res) => {
+  try {
+    const { selectedDocs } = req.body || {};
+    const index = await loadIndex();
+    const maxDocs = Number(process.env.SUMMARY_MAX_DOCS || 6);
+    const snippetsPerDoc = Number(process.env.SUMMARY_SNIPPETS_PER_DOC || 2);
+    const snippetChars = Number(process.env.SUMMARY_SNIPPET_CHARS || 400);
+
+    const allow = Array.isArray(selectedDocs) && selectedDocs.length ? new Set(selectedDocs) : null;
+    const byDoc = new Map();
+    for (const item of index.items || []) {
+      if (allow && !allow.has(item.sourcePath)) continue;
+      const key = item.sourcePath;
+      if (!byDoc.has(key)) byDoc.set(key, []);
+      const arr = byDoc.get(key);
+      if (arr.length < snippetsPerDoc) {
+        const text = (item.text || '').slice(0, snippetChars);
+        arr.push({ pageNumber: item.pageNumber || null, text });
+      }
+    }
+
+    const docEntries = Array.from(byDoc.entries()).slice(0, maxDocs);
+    const system = 'You summarize one document accurately and concisely. Avoid speculation.';
+    const perDocMaxTokens = Math.max(200, Math.floor(Number(process.env.SUMMARY_MAX_TOKENS || 800) / Math.max(1, docEntries.length)));
+    const sections = [];
+    for (const [sourcePath, parts] of docEntries) {
+      const name = path.basename(sourcePath);
+      const joined = parts
+        .map((p) => (p.pageNumber ? `(p.${p.pageNumber}) ` : '') + p.text)
+        .join('\n');
+      const user = `Document name: ${name}\nSnippets (from this document only):\n${joined}\n\nTask: Produce Markdown with:\n- A heading with the document name\n- A 1-3 sentence précis of its contents\n- 3-5 bullet themes`;
+      const section = await chatComplete([
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ], { temperature: 0.2, max_tokens: perDocMaxTokens });
+      if (section) sections.push(section);
+    }
+
+    res.json({ ok: true, summary: sections.join('\n\n') });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 // Suggest three helpful questions based on current corpus context
 app.post('/api/suggest', async (req, res) => {
   try {
     const k = Number(process.env.SUGGEST_TOP_K || 10);
-    const { history: rawHistory } = req.body || {};
+    const { history: rawHistory, selectedDocs } = req.body || {};
     const historyMessages = sanitizeHistory(rawHistory);
     const recent = historyMessages.slice(-6);
 
@@ -92,6 +152,9 @@ app.post('/api/suggest', async (req, res) => {
       const perDocChars = Number(process.env.SUGGEST_SNIPPET_CHARS || 300);
       const byDoc = new Map();
       for (const item of index.items || []) {
+        if (Array.isArray(selectedDocs) && selectedDocs.length) {
+          if (!selectedDocs.includes(item.sourcePath)) continue;
+        }
         const key = item.sourcePath;
         if (!byDoc.has(key)) byDoc.set(key, []);
         const arr = byDoc.get(key);
@@ -110,7 +173,7 @@ app.post('/api/suggest', async (req, res) => {
         .map((m) => `${m.role}: ${m.content}`)
         .join(' \n ')
         .slice(0, 1200);
-      const results = await searchIndex(seedQuery, k);
+      const results = await searchIndex(seedQuery, k, Array.isArray(selectedDocs) && selectedDocs.length ? selectedDocs : null);
       const snippets = results.map(({ item }) => {
         const name = path.basename(item.sourcePath);
         const page = item.pageNumber ? ` p.${item.pageNumber}` : '';
@@ -311,7 +374,7 @@ function sanitizeHistory(raw) {
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { query, history: rawHistory } = req.body || {};
+    const { query, history: rawHistory, selectedDocs } = req.body || {};
     if (!query) return res.status(400).json({ ok: false, error: 'Missing query' });
 
     // Augment retrieval with last assistant answer excerpt (if any)
@@ -321,7 +384,7 @@ app.post('/api/chat', async (req, res) => {
     const assistantExcerpt = lastAssistant ? lastAssistant.content.slice(0, excerptLen) : '';
     const retrievalQuery = assistantExcerpt ? `${assistantExcerpt} \n\n${query}` : query;
 
-    const results = await searchIndex(retrievalQuery, 6);
+    const results = await searchIndex(retrievalQuery, 6, Array.isArray(selectedDocs) && selectedDocs.length ? selectedDocs : null);
 
     const contextLines = results.map(({ item }) => {
       const name = path.basename(item.sourcePath);
@@ -366,7 +429,7 @@ app.post('/api/chat', async (req, res) => {
 // Streaming chat via SSE
 app.post('/api/chat/stream', async (req, res) => {
   try {
-    const { query, history: rawHistory } = req.body || {};
+    const { query, history: rawHistory, selectedDocs } = req.body || {};
     if (!query) return res.status(400).json({ ok: false, error: 'Missing query' });
 
     // Augment retrieval with last assistant answer excerpt (if any)
@@ -376,7 +439,7 @@ app.post('/api/chat/stream', async (req, res) => {
     const assistantExcerpt = lastAssistant ? lastAssistant.content.slice(0, excerptLen) : '';
     const retrievalQuery = assistantExcerpt ? `${assistantExcerpt} \n\n${query}` : query;
 
-    const results = await searchIndex(retrievalQuery, 6);
+    const results = await searchIndex(retrievalQuery, 6, Array.isArray(selectedDocs) && selectedDocs.length ? selectedDocs : null);
     const contextLines = results.map(({ item }) => {
       const name = path.basename(item.sourcePath);
       const pageLabel = item.pageNumber ? ` p.${item.pageNumber}` : '';

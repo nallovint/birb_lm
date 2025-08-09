@@ -17,8 +17,15 @@
       </div>
     </header>
 
-    <main style="display:flex; gap:18px; align-items: flex-start;">
-      <div style="flex:1.1; min-width:0;">
+    <main class="layout" id="main-layout">
+      <aside id="doc-select" class="doc-select">
+        <div class="doc-select-inner">
+          <h3>Select documents</h3>
+          <div id="doc-list" class="doc-list">Loading...</div>
+          <button id="lock-selection" class="lock-btn">Use selected</button>
+        </div>
+      </aside>
+      <div class="chat-col">
         <div id="chat"></div>
         <div id="suggestions" style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;"></div>
         <div class="input">
@@ -26,7 +33,7 @@
           <button id="send">Send</button>
         </div>
       </div>
-      <aside id="summary-panel" style="width:352px; position:sticky; top:16px;">
+      <aside id="summary-panel" class="summary-panel">
         <div style="background:#121826; border:1px solid #1d2536; border-radius:10px; padding:12px;">
           <h3 style="margin:0 0 8px 0;">Document Summary</h3>
           <div id="summary" style="font-size:0.95em; opacity:0.95;">

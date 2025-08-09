@@ -126,11 +126,18 @@ export function cosineSimilarity(a, b) {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-export async function searchIndex(query, k = 6) {
+export async function searchIndex(query, k = 6, allowedSourcePaths = null) {
   const index = await loadIndex();
   if (!index.items.length) return [];
   const [qvec] = await embedTexts([query]);
-  const scored = index.items.map((item) => ({ item, score: cosineSimilarity(qvec, item.vector) }));
+  const allow = Array.isArray(allowedSourcePaths) && allowedSourcePaths.length
+    ? new Set(allowedSourcePaths.map((p) => path.resolve(p)))
+    : null;
+  const candidates = allow
+    ? index.items.filter((it) => allow.has(path.resolve(it.sourcePath)))
+    : index.items;
+  if (!candidates.length) return [];
+  const scored = candidates.map((item) => ({ item, score: cosineSimilarity(qvec, item.vector) }));
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, Math.min(k, scored.length));
 }

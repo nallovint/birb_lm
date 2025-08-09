@@ -6,7 +6,35 @@ const statusEl = document.getElementById('status');
 const providerEl = document.getElementById('provider');
 const summaryEl = document.getElementById('summary');
 const suggestionsEl = document.getElementById('suggestions');
+const docListEl = document.getElementById('doc-list');
+const lockBtn = document.getElementById('lock-selection');
+const docSelectPanel = document.getElementById('doc-select');
+const mainLayoutEl = document.getElementById('main-layout');
 let isSending = false;
+let selectionLocked = false;
+let selectedDocPaths = [];
+async function refreshSelectedSummary() {
+  if (!summaryEl) return;
+  try {
+    summaryEl.textContent = 'Loading summary...';
+    const res = await fetch('/api/summary', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ selectedDocs: selectedDocPaths }),
+    });
+    const data = await res.json();
+    const text = data.ok ? (data.summary || 'No summary available.') : 'Unable to load summary.';
+    if (window.marked && window.DOMPurify) {
+      const html = marked.parse(text);
+      summaryEl.innerHTML = DOMPurify.sanitize(html);
+    } else {
+      summaryEl.textContent = text;
+    }
+  } catch (e) {
+    summaryEl.textContent = 'Unable to load summary.';
+  }
+}
+
 
 // In-memory conversation history for multi-turn
 // Each item: { role: 'user'|'assistant', content: string }
@@ -45,6 +73,16 @@ async function send() {
   const q = queryEl.value.trim();
   if (!q) return;
 
+  // On first send, lock the selection panel and hide it
+  if (!selectionLocked) {
+    selectionLocked = true;
+    if (docSelectPanel) docSelectPanel.style.display = 'none';
+    if (mainLayoutEl) mainLayoutEl.classList.add('no-docs');
+    // Refresh summary and suggestions immediately based on locked selection
+    refreshSelectedSummary();
+    fetchSuggestions();
+  }
+
   // Push and display user message
   conversationHistory.push({ role: 'user', content: q });
   addMessage('user', q);
@@ -65,7 +103,7 @@ async function send() {
     const res = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: q, history: conversationHistory }),
+      body: JSON.stringify({ query: q, history: conversationHistory, selectedDocs: selectedDocPaths }),
     });
     if (!res.ok || !res.body) throw new Error('Streaming not available');
     const reader = res.body.getReader();
@@ -189,7 +227,7 @@ async function fetchSuggestions() {
     const res = await fetch('/api/suggest', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ history: conversationHistory }),
+      body: JSON.stringify({ history: conversationHistory, selectedDocs: selectedDocPaths }),
     });
     const data = await res.json();
     if (!data.ok || !Array.isArray(data.questions)) throw new Error('suggestions error');
@@ -214,3 +252,47 @@ async function fetchSuggestions() {
 
 // initial load
 fetchSuggestions();
+
+// Document selection logic
+(async function initDocs() {
+  if (!docListEl) return;
+  try {
+    const res = await fetch('/api/docs');
+    const data = await res.json();
+    if (!data.ok || !Array.isArray(data.docs)) throw new Error('docs error');
+    docListEl.innerHTML = '';
+    data.docs.forEach((doc) => {
+      const row = document.createElement('label');
+      row.className = 'doc-item';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = doc.path;
+      cb.addEventListener('change', () => {
+        if (cb.checked) {
+          if (!selectedDocPaths.includes(doc.path)) selectedDocPaths.push(doc.path);
+        } else {
+          selectedDocPaths = selectedDocPaths.filter((p) => p !== doc.path);
+        }
+      });
+      const name = document.createElement('span');
+      name.textContent = doc.name;
+      row.appendChild(cb);
+      row.appendChild(name);
+      docListEl.appendChild(row);
+    });
+  } catch (e) {
+    docListEl.textContent = 'Unable to load docs.';
+  }
+})();
+
+if (lockBtn) {
+  lockBtn.addEventListener('click', () => {
+    if (!selectionLocked) {
+      selectionLocked = true;
+      if (docSelectPanel) docSelectPanel.style.display = 'none';
+      if (mainLayoutEl) mainLayoutEl.classList.add('no-docs');
+      refreshSelectedSummary();
+      fetchSuggestions();
+    }
+  });
+}

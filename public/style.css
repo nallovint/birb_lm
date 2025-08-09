@@ -1,10 +1,10 @@
 body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: #0b0f17; color: #eaeef4; margin: 0; }
-.container { max-width: 990px; margin: 0 auto; padding: 20px; }
+.container { width: 90vw; max-width: 90vw; margin: 0 auto; padding: 20px; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .controls { display: flex; align-items: center; gap: 12px; }
 button { background: #2a5bd7; color: white; border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
-#chat { background: #121826; border: 1px solid #1d2536; border-radius: 10px; padding: 12px; min-height: 300px; }
+#chat { background: #121826; border: 1px solid #1d2536; border-radius: 10px; padding: 12px; min-height: 40vh; max-height: 60vh; overflow-y: auto; }
 .msg { padding: 10px 12px; margin: 8px 0; border-radius: 8px; }
 .msg.user { background: #183153; }
 .msg.assistant { background: #15253f; }
@@ -15,3 +15,24 @@ textarea { flex: 1; border-radius: 8px; border: 1px solid #1d2536; background: #
 .msg.assistant pre { background: #0d1320; border: 1px solid #1d2536; padding: 10px; border-radius: 8px; overflow-x: auto; }
 .msg.assistant code { background: #0d1320; padding: 2px 4px; border-radius: 4px; }
 .msg.assistant a { color: #8ab4ff; }
+
+/* Responsive three-column layout using percentages */
+.layout { display: grid; grid-template-columns: 22% 1fr 26%; gap: 18px; align-items: start; }
+.layout.no-docs { grid-template-columns: 1fr 28%; }
+.chat-col { min-width: 0; }
+.summary-panel { position: sticky; top: 16px; }
+.summary-panel > div { max-height: 60vh; overflow-y: auto; }
+
+/* Document selection panel */
+.doc-select { position: sticky; top: 16px; }
+.doc-select-inner { background:#121826; border:1px solid #1d2536; border-radius:10px; padding:12px; }
+.doc-list { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; margin: 8px 0; }
+.doc-item { display:flex; align-items:center; gap:8px; font-size: 0.95em; }
+.doc-item input { accent-color: #2a5bd7; }
+.lock-btn { width: 100%; }
+
+@media (max-width: 980px) {
+  .layout { grid-template-columns: 100%; }
+  .summary-panel { position: static; }
+  .doc-select { position: static; }
+}
