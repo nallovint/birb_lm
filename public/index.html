@@ -17,12 +17,23 @@
       </div>
     </header>
 
-    <main>
-      <div id="chat"></div>
-      <div class="input">
-        <textarea id="query" rows="3" placeholder="Ask a question about your documents..."></textarea>
-        <button id="send">Send</button>
+    <main style="display:flex; gap:16px; align-items: flex-start;">
+      <div style="flex:1; min-width:0;">
+        <div id="chat"></div>
+        <div id="suggestions" style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;"></div>
+        <div class="input">
+          <textarea id="query" rows="3" placeholder="Ask a question about your documents..."></textarea>
+          <button id="send">Send</button>
+        </div>
       </div>
+      <aside id="summary-panel" style="width:320px; position:sticky; top:16px;">
+        <div style="background:#121826; border:1px solid #1d2536; border-radius:10px; padding:12px;">
+          <h3 style="margin:0 0 8px 0;">Document Summary</h3>
+          <div id="summary" style="font-size:0.95em; opacity:0.95;">
+            Loading summary...
+          </div>
+        </div>
+      </aside>
     </main>
   </div>
 

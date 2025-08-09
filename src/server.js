@@ -4,7 +4,7 @@ import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chatComplete, DEFAULT_MODEL, getProviderInfo, chatCompleteStream } from './llmClient.js';
-import { searchIndex, buildAndSaveIndex } from './retriever.js';
+import { searchIndex, buildAndSaveIndex, loadIndex } from './retriever.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,6 +22,162 @@ app.post('/api/ingest', async (req, res) => {
     const dir = process.env.DOCS_DIR || 'docs';
     const idx = await buildAndSaveIndex(dir);
     res.json({ ok: true, chunks: idx.items.length });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Generate an asynchronous brief summary of the current document corpus
+app.get('/api/summary', async (req, res) => {
+  try {
+    // Build per-document context from the current index
+    const index = await loadIndex();
+    const maxDocs = Number(process.env.SUMMARY_MAX_DOCS || 6);
+    const snippetsPerDoc = Number(process.env.SUMMARY_SNIPPETS_PER_DOC || 2);
+    const snippetChars = Number(process.env.SUMMARY_SNIPPET_CHARS || 400);
+
+    const byDoc = new Map();
+    for (const item of index.items || []) {
+      const key = item.sourcePath;
+      if (!byDoc.has(key)) byDoc.set(key, []);
+      const arr = byDoc.get(key);
+      if (arr.length < snippetsPerDoc) {
+        const text = (item.text || '').slice(0, snippetChars);
+        arr.push({ pageNumber: item.pageNumber || null, text });
+      }
+      if (byDoc.size >= maxDocs && arr.length >= snippetsPerDoc) {
+        // continue to fill other docs' first snippets, no early break
+      }
+    }
+
+    const docEntries = Array.from(byDoc.entries()).slice(0, maxDocs);
+    // Summarize each document separately to ensure coverage, then concatenate
+    const system = 'You summarize one document accurately and concisely. Avoid speculation.';
+    const perDocMaxTokens = Math.max(200, Math.floor(Number(process.env.SUMMARY_MAX_TOKENS || 800) / Math.max(1, docEntries.length)));
+    const sections = [];
+    for (const [sourcePath, parts] of docEntries) {
+      const name = path.basename(sourcePath);
+      const joined = parts
+        .map((p) => (p.pageNumber ? `(p.${p.pageNumber}) ` : '') + p.text)
+        .join('\n');
+      const user = `Document name: ${name}\nSnippets (from this document only):\n${joined}\n\nTask: Produce Markdown with:\n- A heading with the document name\n- A 1-3 sentence précis of its contents\n- 3-5 bullet themes`;
+      const section = await chatComplete([
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ], { temperature: 0.2, max_tokens: perDocMaxTokens });
+      if (section) sections.push(section);
+    }
+
+    res.json({ ok: true, summary: sections.join('\n\n') });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Suggest three helpful questions based on current corpus context
+app.post('/api/suggest', async (req, res) => {
+  try {
+    const k = Number(process.env.SUGGEST_TOP_K || 10);
+    const { history: rawHistory } = req.body || {};
+    const historyMessages = sanitizeHistory(rawHistory);
+    const recent = historyMessages.slice(-6);
+
+    let context = '';
+    if (recent.length === 0) {
+      // Initial suggestions: ensure coverage across documents
+      const index = await loadIndex();
+      const maxDocs = Number(process.env.SUGGEST_MAX_DOCS || 8);
+      const perDocChars = Number(process.env.SUGGEST_SNIPPET_CHARS || 300);
+      const byDoc = new Map();
+      for (const item of index.items || []) {
+        const key = item.sourcePath;
+        if (!byDoc.has(key)) byDoc.set(key, []);
+        const arr = byDoc.get(key);
+        if (arr.length < 1) arr.push({ pageNumber: item.pageNumber || null, text: (item.text || '').slice(0, perDocChars) });
+      }
+      const docEntries = Array.from(byDoc.entries()).slice(0, maxDocs);
+      const parts = docEntries.map(([sourcePath, arr]) => {
+        const name = path.basename(sourcePath);
+        const s = arr.map((p) => (p.pageNumber ? `(p.${p.pageNumber}) ` : '') + p.text).join('\n');
+        return `[${name}] ${s}`;
+      });
+      context = parts.join('\n\n');
+    } else {
+      // Conversation-based suggestions: bias retrieval towards recent context
+      const seedQuery = recent
+        .map((m) => `${m.role}: ${m.content}`)
+        .join(' \n ')
+        .slice(0, 1200);
+      const results = await searchIndex(seedQuery, k);
+      const snippets = results.map(({ item }) => {
+        const name = path.basename(item.sourcePath);
+        const page = item.pageNumber ? ` p.${item.pageNumber}` : '';
+        return `[${name}${page}] ${item.text.slice(0, 500)}`;
+      });
+      context = snippets.join('\n\n');
+    }
+
+    const system = 'You are assisting a user exploring a document corpus. Propose three concise, high-signal questions grounded in the provided context. Ensure each question is unique and does NOT repeat or lightly paraphrase the user\'s recent questions. Output ONLY a JSON array of 3 strings. Do not include any extra text.';
+    const convo = recent.map((m) => `- ${m.role}: ${m.content}`).join('\n') || '(no prior conversation)';
+    const user = `CONTEXT:\n${context}\n\nRECENT CONVERSATION (may be empty):\n${convo}\n\nTask: Propose three helpful, distinct questions that do not repeat what was just asked.`;
+
+    const raw = await chatComplete([
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ], { temperature: 0.3, max_tokens: 200 });
+
+    let questions = [];
+    try {
+      questions = JSON.parse(raw);
+      if (!Array.isArray(questions)) throw new Error('not array');
+      questions = questions.map((q) => String(q)).filter(Boolean).slice(0, 3);
+    } catch {
+      // Fallback: parse lines
+      questions = raw
+        .split(/\n/)
+        .map((l) => l.replace(/^[-*\d\.\)\s]+/, '').trim())
+        .filter(Boolean)
+        .slice(0, 3);
+    }
+    // Post-process: de-duplicate and avoid recent user questions
+    const normalize = (s) => (s || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s\?]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const recentUser = historyMessages.filter((m) => m.role === 'user').slice(-3).map((m) => normalize(m.content));
+    const seen = new Set();
+    const filtered = [];
+    for (const q of questions) {
+      const nq = normalize(q);
+      if (!nq) continue;
+      let tooSimilar = false;
+      for (const ru of recentUser) {
+        if (!ru) continue;
+        if (nq === ru) { tooSimilar = true; break; }
+        if (nq.length >= 12 && (nq.includes(ru) || ru.includes(nq))) { tooSimilar = true; break; }
+      }
+      if (tooSimilar) continue;
+      if (seen.has(nq)) continue;
+      seen.add(nq);
+      filtered.push(q);
+      if (filtered.length === 3) break;
+    }
+    while (filtered.length < 3) {
+      const fillers = [
+        'What are the main topics covered across these documents?',
+        'Summarize the key takeaways with citations.',
+        'Which sections should I read first and why?'
+      ];
+      const q = fillers[filtered.length % fillers.length];
+      const nq = normalize(q);
+      if (!seen.has(nq)) { seen.add(nq); filtered.push(q); }
+      else break;
+    }
+    questions = filtered.slice(0, 3);
+    res.json({ ok: true, questions });
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: String(e) });
@@ -276,10 +432,13 @@ app.post('/api/chat/stream', async (req, res) => {
           accForFlush += evt.text || '';
           send('delta', { text: evt.text });
           hasEmittedDelta = true;
-          if (
-            accForFlush.length >= chunkLimit &&
-            /[\.!?\n]\s*$/.test(accForFlush)
-          ) {
+
+          // Determine if we're inside a fenced code block (``` or ~~~ at start of line)
+          const fences = (accForFlush.match(/(?:^|\n)\s*(?:```|~~~)/g) || []).length;
+          const insideFence = fences % 2 === 1;
+
+          const atSentenceBoundary = /[\.!?]\s*$/.test(accForFlush) || /\n\s*$/.test(accForFlush);
+          if (accForFlush.length >= chunkLimit && atSentenceBoundary && !insideFence) {
             // Signal the client to finalize current message and start a new one
             send('flush', { done: false });
             accForFlush = '';

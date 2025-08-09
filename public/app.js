@@ -4,6 +4,8 @@ const sendBtn = document.getElementById('send');
 const ingestBtn = document.getElementById('ingest-btn');
 const statusEl = document.getElementById('status');
 const providerEl = document.getElementById('provider');
+const summaryEl = document.getElementById('summary');
+const suggestionsEl = document.getElementById('suggestions');
 let isSending = false;
 
 // In-memory conversation history for multi-turn
@@ -113,6 +115,8 @@ async function send() {
               if (acc && acc.trim().length) {
                 conversationHistory.push({ role: 'assistant', content: acc });
               }
+              // Refresh suggestions after each assistant reply
+              fetchSuggestions();
             } else if (event === 'error') {
               const message = evt.error || 'Error';
               holder.textContent = message;
@@ -158,3 +162,55 @@ async function refreshProvider() {
 }
 
 refreshProvider();
+
+// Fetch document summary asynchronously on load
+(async function fetchSummary() {
+  if (!summaryEl) return;
+  try {
+    const res = await fetch('/api/summary');
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'summary error');
+    const text = data.summary || 'No summary available.';
+    if (window.marked && window.DOMPurify) {
+      const html = marked.parse(text);
+      summaryEl.innerHTML = DOMPurify.sanitize(html);
+    } else {
+      summaryEl.textContent = text;
+    }
+  } catch (e) {
+    summaryEl.textContent = 'Unable to load summary.';
+  }
+})();
+
+// Fetch suggested starter questions asynchronously
+async function fetchSuggestions() {
+  if (!suggestionsEl) return;
+  try {
+    const res = await fetch('/api/suggest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ history: conversationHistory }),
+    });
+    const data = await res.json();
+    if (!data.ok || !Array.isArray(data.questions)) throw new Error('suggestions error');
+    suggestionsEl.innerHTML = '';
+    for (const q of data.questions.slice(0, 3)) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = q;
+      btn.style.whiteSpace = 'nowrap';
+      btn.style.overflow = 'hidden';
+      btn.style.textOverflow = 'ellipsis';
+      btn.addEventListener('click', () => {
+        queryEl.value = q;
+        queryEl.focus();
+      });
+      suggestionsEl.appendChild(btn);
+    }
+  } catch (e) {
+    // silent fail for suggestions
+  }
+}
+
+// initial load
+fetchSuggestions();
