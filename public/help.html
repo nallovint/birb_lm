@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BirbLM • Help</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="container">
+    <nav class="topnav">
+      <div class="brand">BirbLM</div>
+      <div class="nav-links">
+        <a href="/" class="link">Landing</a>
+        <a href="/chat.html" class="link">Chat</a>
+        <a href="/settings.html" class="link">Settings</a>
+        <a href="/help.html" class="link active" aria-current="page">Help</a>
+      </div>
+      <span class="spacer"></span>
+      <span class="muted">BirbLM Help</span>
+    </nav>
+
+    <header style="margin-top:8px; margin-bottom:8px;">
+      <h1>BirbLM – Help & Guide</h1>
+      <p class="muted">Install, configure, upload documents, rebuild the index, and chat with citations.</p>
+    </header>
+
+    <main class="settings-grid">
+      <section class="card">
+        <h2>Overview</h2>
+        <p>BirbLM is a lightweight RAG app that lets you chat with your documents. It supports Groq (cloud) or Ollama (local, OpenAI‑compatible). A settings page lets you switch providers at runtime. A document manager supports drag‑drop/browse uploads and deletions. Index rebuilds show a live progress bar (in Settings and in Chat).</n+        </p>
+        <ul class="bullets">
+          <li>Supported file types: <code>.pdf</code>, <code>.docx</code>, <code>.md</code>, <code>.txt</code></li>
+          <li>Embeddings: MiniLM via <code>@xenova/transformers</code></li>
+          <li>Retrieval‑augmented answers with source citations</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Quick Start</h2>
+        <ol>
+          <li>Start: <code>docker compose up -d</code></li>
+          <li>Open: <code>http://localhost:3000</code> (Landing)</li>
+          <li>Settings: choose Groq or Ollama, Test Connection, Save</li>
+          <li>Upload documents in Settings → Documents</li>
+          <li>Rebuild index (Settings or Chat header) and watch progress</li>
+          <li>Open App and chat; select docs on the left and lock selection</li>
+        </ol>
+      </section>
+
+      <section class="card">
+        <h2>Provider Setup</h2>
+        <h3>Groq (cloud)</h3>
+        <ul class="bullets">
+          <li>Enter API key and model (e.g., <code>llama-3.1-8b-instant</code>)</li>
+          <li>Click Test Connection, then Save Settings</li>
+        </ul>
+        <h3>Ollama (local)</h3>
+        <ul class="bullets">
+          <li>URL: <code>http://ollama:11434</code> (Docker) or <code>http://localhost:11434</code> (host)</li>
+          <li>Model: e.g., <code>llama3.1:8b</code> (pull with <code>docker compose exec ollama ollama pull llama3.1:8b</code>)</li>
+          <li>Click Test Connection, then Save Settings</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Documents</h2>
+        <ul class="bullets">
+          <li>Upload via drag‑drop or the browse dialog (PDF/DOCX/MD/TXT)</li>
+          <li>Delete files from the library list</li>
+          <li>Uploads are disabled while an index rebuild is running</li>
+        </ul>
+        <h3>Rebuild index</h3>
+        <ul class="bullets">
+          <li>Click Rebuild index in Settings or in Chat</li>
+          <li>Progress shows Chunking and Embedding with a live bar and counts</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Chat</h2>
+        <ul class="bullets">
+          <li>Select one or more documents on the left</li>
+          <li>Click Use selected (or send your first message) to lock selection</li>
+          <li>Ask questions; answers cite sources and suggestions update automatically</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>How it works</h2>
+        <ul class="bullets">
+          <li><strong>Indexing</strong>: PDFs are one chunk per page; other text is chunked by word window with overlap; embeddings saved to <code>storage/index.json</code></li>
+          <li><strong>Retrieval</strong>: queries are embedded and top‑K chunks are used as context; selection limits retrieval to chosen docs</li>
+          <li><strong>Settings</strong>: persisted at <code>storage/settings.json</code>; switching providers doesn’t require a restart</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Environment variables (optional)</h2>
+        <p>The Settings UI covers most needs. Env vars let you tweak behavior:</p>
+        <ul class="bullets">
+          <li><strong>Provider/Models</strong>: <code>LLM_MODE</code>, <code>GROQ_API_KEY</code>, <code>GROQ_MODEL</code>, <code>LLM_BASE_URL</code>, <code>LLM_MODEL</code></li>
+          <li><strong>Indexing/Storage</strong>: <code>DOCS_DIR</code>, <code>INDEX_DIR</code>, <code>UPLOAD_MAX_BYTES</code>, <code>JSON_BODY_LIMIT</code>, <code>PDF_MAX_CHARS</code>, <code>TXT_CHUNK_SIZE</code>, <code>TXT_CHUNK_OVERLAP</code>, <code>EMBED_YIELD_EVERY_N</code>, <code>BUILD_YIELD_EVERY_N</code></li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Troubleshooting</h2>
+        <ul class="bullets">
+          <li><strong>Provider seems wrong</strong>: Test Connection → Save Settings; hard refresh Chat; verify Ollama URL reachable</li>
+          <li><strong>Uploads fail</strong>: Allowed `.pdf`, `.docx`, `.md`, `.txt`; check size limit; see <code>docker compose logs -f app</code></li>
+          <li><strong>Embedding looks stuck</strong>: Small corpora may finish between polls; try more files; tune <code>EMBED_YIELD_EVERY_N</code></li>
+          <li><strong>No results</strong>: Rebuild after adding files; ensure you selected the right docs before the first message</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Development</h2>
+        <p>Requires Node.js 20+ if running without Docker:</p>
+        <pre class="code-card"><code>npm install
+npm start
+# Visit http://localhost:3000</code></pre>
+      </section>
+
+      <section class="card">
+        <h2>Security</h2>
+        <ul class="bullets">
+          <li>API keys are never logged</li>
+          <li>Filenames sanitized; path traversal blocked on delete</li>
+          <li>File types and sizes validated on upload</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>UI Reference (buttons only)</h2>
+        <p class="muted">These are examples of the UI buttons/controls used across the app. They are non‑functional here (visual aid only).</p>
+        <div class="actions" style="flex-wrap:wrap;">
+          <button class="btn-primary" type="button">Open App</button>
+          <button class="btn-secondary" type="button">Settings</button>
+          <button class="btn-secondary" type="button">Help</button>
+          <button class="btn-secondary" type="button">Rebuild index</button>
+          <button class="btn-secondary" type="button">Test Connection</button>
+          <button class="btn-primary" type="button">Save Settings</button>
+          <button class="btn-secondary" type="button">Reset</button>
+          <button class="btn-secondary" type="button">Use selected</button>
+          <button class="btn-secondary" type="button">Select All</button>
+          <button class="btn-secondary" type="button">Clear</button>
+          <button class="btn-secondary" type="button">Delete</button>
+        </div>
+        <div class="progress" style="max-width:300px; margin-top:10px;" aria-hidden="true">
+          <div class="progress-bar" style="width:60%"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
+
+

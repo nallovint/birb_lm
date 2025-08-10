@@ -42,6 +42,10 @@ textarea { flex: 1; border-radius: 8px; border: 1px solid #1d2536; background: #
 .topnav .spacer { flex:1; }
 .brand { font-weight: 700; font-size: 1.1rem; }
 .provider-badge { opacity: 0.8; }
+.nav-links { display:flex; gap:10px; align-items:center; }
+.nav-links .link { padding: 8px 10px; border-radius: 8px; text-decoration: none; color: #8ab4ff; }
+.nav-links .link:hover { background: #121826; border: 1px solid #1d2536; }
+.nav-links .link.active, .nav-links .link[aria-current="page"] { background: #2a5bd7; color: #fff; border-color: transparent; }
 
 .landing-hero { position: relative; min-height: 60vh; display:flex; align-items:center; justify-content:center; background: radial-gradient(1200px 600px at 50% -20%, #1b2847 0%, #0b0f17 60%); }
 .landing-overlay { position:absolute; inset:0; background: linear-gradient(180deg, rgba(11,15,23,0.3) 0%, rgba(11,15,23,1) 80%); pointer-events:none; }
