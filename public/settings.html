@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings • RAG Try</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="container">
+    <nav class="topnav">
+      <a href="/" class="link">← Back to Landing</a>
+      <a href="/chat.html" class="link">Open App</a>
+      <span class="spacer"></span>
+      <span id="active-provider" class="provider-badge"></span>
+    </nav>
+
+    <header style="margin-top:8px; margin-bottom:8px;">
+      <h1>Settings</h1>
+      <p class="muted">Configure AI provider and connection settings.</p>
+    </header>
+
+    <main class="settings-grid">
+      <section class="card">
+        <h2>AI Provider</h2>
+        <form id="settings-form" class="form">
+          <div class="field">
+            <label class="label">Provider</label>
+            <div class="inline">
+              <label class="radio"><input type="radio" name="aiProvider" value="groq"> Groq</label>
+              <label class="radio"><input type="radio" name="aiProvider" value="ollama"> Ollama (OpenAI-compatible)</label>
+            </div>
+          </div>
+
+          <div id="groq-fields" class="group" hidden>
+            <div class="field">
+              <label class="label" for="groq-apiKey">Groq API Key</label>
+              <input id="groq-apiKey" type="password" class="input-text" placeholder="gsk_..." autocomplete="off" />
+              <div class="help">Find your key at <a class="link" target="_blank" rel="noreferrer" href="https://console.groq.com">Groq Console</a>.</div>
+            </div>
+            <div class="field">
+              <label class="label" for="groq-model">Groq Model</label>
+              <input id="groq-model" type="text" class="input-text" placeholder="llama-3.1-8b-instant" />
+            </div>
+          </div>
+
+          <div id="ollama-fields" class="group" hidden>
+            <div class="field">
+              <label class="label" for="ollama-url">Ollama URL</label>
+              <input id="ollama-url" type="url" class="input-text" placeholder="http://localhost:11434" />
+              <div class="help">In Docker, use <code>http://ollama:11434</code>. On the host, use <code>http://localhost:11434</code>.</div>
+            </div>
+            <div class="field">
+              <label class="label" for="ollama-model">Ollama Model</label>
+              <input id="ollama-model" type="text" class="input-text" placeholder="llama3.1:8b" />
+              <div class="help">Ensure the model is pulled: <code>docker compose exec ollama ollama pull llama3.1:8b</code></div>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="test-btn" type="button" class="btn-secondary">Test Connection</button>
+            <span id="test-status" class="status"></span>
+          </div>
+
+          <div class="actions">
+            <button id="save-btn" type="submit" class="btn-primary">Save Settings</button>
+            <button id="reset-btn" type="button" class="btn-secondary">Reset</button>
+            <span id="save-status" class="status"></span>
+          </div>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Documents</h2>
+        <div id="upload-zone" class="upload-zone" tabindex="0">
+          <p>Drag & drop files here, or <label for="file-picker" class="link">browse</label> to upload.</p>
+          <input id="file-picker" type="file" multiple hidden accept=".pdf,.docx,.md,.txt" />
+          <div id="upload-status" class="status" style="margin-top:8px;"></div>
+        </div>
+        <div class="actions">
+          <button id="rebuild-btn" type="button" class="btn-secondary">Rebuild index</button>
+          <span id="rebuild-status" class="status"></span>
+        </div>
+        <div class="progress" aria-hidden="true">
+          <div id="rebuild-bar" class="progress-bar" style="width:0%"></div>
+        </div>
+        <div class="field" style="margin-top:10px;">
+          <label class="label" for="doc-search">Search</label>
+          <input id="doc-search" type="text" class="input-text" placeholder="Filter documents..." />
+        </div>
+        <div id="doc-listing" class="doc-listing"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/settings.js"></script>
+</body>
+</html>
+
+

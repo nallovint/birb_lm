@@ -3,20 +3,75 @@ import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chatComplete, DEFAULT_MODEL, getProviderInfo, chatCompleteStream } from './llmClient.js';
-import { searchIndex, buildAndSaveIndex, loadIndex, listDocFiles } from './retriever.js';
+// Use runtime-switchable adapter (instead of env-cached llmClient)
+import { llmChatComplete as chatComplete, llmChatCompleteStream as chatCompleteStream, getRuntimeProviderInfo as getProviderInfo } from './llmAdapter.js';
+import { loadSettings, saveSettings } from './settings.js';
+import fs from 'node:fs/promises';
+import { searchIndex, buildAndSaveIndex, loadIndex, listDocFiles, estimateCorpusChunks, buildCorpusChunks, embedTexts, saveIndex } from './retriever.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '2mb' }));
+// Increase JSON limit to support base64 uploads up to ~20MB
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '30mb' }));
 
 // Static UI
 const publicDir = path.resolve(__dirname, '../public');
 app.use(express.static(publicDir));
 
+// Settings Management
+app.get('/api/settings', async (req, res) => {
+  try {
+    const s = await loadSettings();
+    res.json({ success: true, data: s });
+  } catch (e) {
+    res.status(500).json({ success: false, error: String(e) });
+  }
+});
+
+app.post('/api/settings', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const provider = String(body.aiProvider || '').toLowerCase();
+    if (provider && !['groq', 'ollama'].includes(provider)) {
+      return res.status(400).json({ success: false, error: 'Invalid aiProvider' });
+    }
+    if (body.ollama?.url && !/^https?:\/\//i.test(body.ollama.url)) {
+      return res.status(400).json({ success: false, error: 'Invalid Ollama URL' });
+    }
+    const saved = await saveSettings(body);
+    res.json({ success: true, message: 'Settings saved', data: saved });
+  } catch (e) {
+    res.status(500).json({ success: false, error: String(e) });
+  }
+});
+
+app.get('/api/settings/test', async (req, res) => {
+  try {
+    const s = await loadSettings();
+    if (s.aiProvider === 'groq') {
+      if (!s.groq.apiKey) return res.json({ success: false, message: 'Missing GROQ API key' });
+      const out = await chatComplete([
+        { role: 'system', content: 'You return the word ok.' },
+        { role: 'user', content: 'Say ok' },
+      ], { max_tokens: 3 });
+      return res.json({ success: true, message: 'Groq reachable', data: { sample: out?.slice(0, 32) } });
+    }
+    const base = s.ollama?.url || 'http://ollama:11434';
+    try {
+      const resp = await fetch(new URL('/v1/models', base));
+      const ok = resp.ok;
+      const models = ok ? await resp.json().catch(() => ({})) : null;
+      return res.json({ success: ok, message: ok ? 'Ollama reachable' : `Ollama HTTP ${resp.status}`, data: models });
+    } catch (err) {
+      return res.json({ success: false, message: 'Ollama not reachable', error: String(err) });
+    }
+  } catch (e) {
+    res.status(500).json({ success: false, error: String(e) });
+  }
+});
 app.post('/api/ingest', async (req, res) => {
   try {
     const dir = process.env.DOCS_DIR || 'docs';
@@ -26,6 +81,60 @@ app.post('/api/ingest', async (req, res) => {
     console.error(e);
     res.status(500).json({ ok: false, error: String(e) });
   }
+});
+
+// Progressive ingest with simple polling progress state (in-memory)
+let ingestProgress = { stage: 'idle', processed: 0, total: 0 };
+app.post('/api/ingest/start', async (req, res) => {
+  try {
+    const dir = process.env.DOCS_DIR || 'docs';
+    ingestProgress = { stage: 'scanning', processed: 0, total: 0 };
+    res.json({ success: true });
+    // Kick off async job
+    ;(async () => {
+      try {
+        // Estimate total chunks for chunking stage to enable progress bar
+        try {
+          const est = await estimateCorpusChunks(dir);
+          ingestProgress = { stage: 'chunking', processed: 0, total: est };
+        } catch {
+          ingestProgress = { stage: 'chunking', processed: 0, total: 0 };
+        }
+        const chunks = await buildCorpusChunks(dir, {
+          onProgress: ({ processed }) => {
+            ingestProgress = { stage: 'chunking', processed, total: ingestProgress.total };
+          }
+        });
+        ingestProgress = { stage: 'embedding', processed: 0, total: chunks.length };
+        const texts = chunks.map(c => c.text);
+        const embeddings = await embedTexts(texts, {
+          onProgress: ({ processed }) => {
+            ingestProgress = { stage: 'embedding', processed, total: chunks.length };
+          }
+        });
+        const dim = embeddings.length ? embeddings[0].length : 384;
+        const items = chunks.map((c, i) => ({
+          vector: embeddings[i] ?? new Array(dim).fill(0),
+          text: c.text,
+          sourcePath: c.sourcePath,
+          pageNumber: c.pageNumber,
+          chunkId: c.chunkId,
+          tokenCount: c.tokenCount,
+        }));
+        await saveIndex({ dim, items });
+        ingestProgress = { stage: 'done', processed: items.length, total: items.length };
+      } catch (err) {
+        ingestProgress = { stage: 'error', processed: 0, total: 0, error: String(err) };
+      }
+    })();
+  } catch (e) {
+    ingestProgress = { stage: 'error', processed: 0, total: 0, error: String(e) };
+    res.status(500).json({ success: false, error: String(e) });
+  }
+});
+
+app.get('/api/ingest/status', async (req, res) => {
+  res.json({ success: true, data: ingestProgress });
 });
 
 // List available documents for selection
@@ -38,6 +147,76 @@ app.get('/api/docs', async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Documents enhanced API
+app.get('/api/documents', async (req, res) => {
+  try {
+    const dir = process.env.DOCS_DIR || 'docs';
+    const files = await listDocFiles(dir);
+    const docs = await Promise.all(files.map(async (abs) => {
+      let size = 0; let mtime = null; let type = (path.extname(abs).slice(1) || '').toLowerCase();
+      try { const st = await fs.stat(abs); size = st.size; mtime = st.mtime?.toISOString?.() || null; } catch {}
+      return { path: abs, name: path.basename(abs), size, uploadDate: mtime, processedDate: null, type };
+    }));
+    res.json({ success: true, data: { documents: docs } });
+  } catch (e) {
+    res.status(500).json({ success: false, error: String(e) });
+  }
+});
+
+app.post('/api/documents/upload', async (req, res) => {
+  try {
+    const { fileName, contentBase64 } = req.body || {};
+    if (!fileName || !contentBase64) return res.status(400).json({ success: false, error: 'Missing fileName or contentBase64' });
+    const safe = path.basename(fileName);
+    const allowed = ['.pdf', '.docx', '.md', '.txt'];
+    const ext = path.extname(safe).toLowerCase();
+    if (!allowed.includes(ext)) return res.status(400).json({ success: false, error: 'Unsupported file type' });
+    const buf = Buffer.from(contentBase64, 'base64');
+    const maxBytes = Number(process.env.UPLOAD_MAX_BYTES || 20 * 1024 * 1024);
+    if (buf.length > maxBytes) return res.status(400).json({ success: false, error: 'File too large' });
+    const dir = process.env.DOCS_DIR || 'docs';
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, safe), buf);
+    res.json({ success: true, message: 'Uploaded', data: { name: safe } });
+  } catch (e) {
+    res.status(500).json({ success: false, error: String(e) });
+  }
+});
+
+app.delete('/api/documents/:filename', async (req, res) => {
+  try {
+    const safe = path.basename(req.params.filename || '');
+    if (!safe) return res.status(400).json({ success: false, error: 'Missing filename' });
+    const dir = process.env.DOCS_DIR || 'docs';
+    await fs.unlink(path.join(dir, safe));
+    res.json({ success: true, message: 'Deleted' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: String(e) });
+  }
+});
+
+// Session default selection (persisted in settings)
+app.get('/api/session/documents', async (req, res) => {
+  try {
+    const s = await loadSettings();
+    res.json({ success: true, data: { selectedDocuments: s.documents.defaultSelection || [] } });
+  } catch (e) {
+    res.status(500).json({ success: false, error: String(e) });
+  }
+});
+
+app.post('/api/session/documents', async (req, res) => {
+  try {
+    const { selectedDocuments } = req.body || {};
+    if (!Array.isArray(selectedDocuments)) return res.status(400).json({ success: false, error: 'selectedDocuments must be array' });
+    const s = await loadSettings();
+    const saved = await saveSettings({ documents: { ...s.documents, defaultSelection: selectedDocuments } });
+    res.json({ success: true, message: 'Saved', data: { selectedDocuments: saved.documents.defaultSelection } });
+  } catch (e) {
+    res.status(500).json({ success: false, error: String(e) });
   }
 });
 

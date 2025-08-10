@@ -83,15 +83,21 @@ export function chunkText(text, chunkSize = TXT_CHUNK_SIZE, overlap = TXT_CHUNK_
   return chunks;
 }
 
-export async function embedTexts(texts) {
+export async function embedTexts(texts, { onProgress } = {}) {
   const extractor = await getEmbedder();
   const embeddings = [];
+  const YIELD_EVERY_N = Number(process.env.EMBED_YIELD_EVERY_N || 5);
   for (let i = 0; i < texts.length; i++) {
     const t = texts[i];
     const out = await extractor(t, { pooling: 'mean', normalize: true });
     embeddings.push(Array.from(out.data));
     if ((i + 1) % LOG_EVERY_N_ITEMS === 0) {
       console.log(`[embed] processed ${i + 1}/${texts.length}`);
+    }
+    onProgress?.({ processed: i + 1, total: texts.length });
+    if (YIELD_EVERY_N > 0 && (i + 1) % YIELD_EVERY_N === 0) {
+      // Yield to event loop to allow status polling to respond during long embeddings
+      await new Promise((r) => setTimeout(r, 0));
     }
   }
   return embeddings;
@@ -142,10 +148,11 @@ export async function searchIndex(query, k = 6, allowedSourcePaths = null) {
   return scored.slice(0, Math.min(k, scored.length));
 }
 
-export async function buildCorpusChunks(docDir = 'docs') {
+export async function buildCorpusChunks(docDir = 'docs', { onProgress } = {}) {
   const files = await listDocFiles(docDir);
   const chunks = [];
   let chunkId = 0;
+  const YIELD_EVERY_N = Number(process.env.BUILD_YIELD_EVERY_N || 50);
   for (const filePath of files) {
     const ext = path.extname(filePath).toLowerCase();
     if (ext === '.pdf') {
@@ -164,6 +171,10 @@ export async function buildCorpusChunks(docDir = 'docs') {
         if (chunkId % LOG_EVERY_N_ITEMS === 0) {
           console.log(`[build] chunks so far: ${chunkId}`);
         }
+        onProgress?.({ processed: chunkId });
+        if (YIELD_EVERY_N > 0 && chunkId % YIELD_EVERY_N === 0) {
+          await new Promise((r) => setTimeout(r, 0));
+        }
       }
     } else {
       const text = await loadTextFromFile(filePath);
@@ -181,11 +192,31 @@ export async function buildCorpusChunks(docDir = 'docs') {
         if (chunkId % LOG_EVERY_N_ITEMS === 0) {
           console.log(`[build] chunks so far: ${chunkId}`);
         }
+        onProgress?.({ processed: chunkId });
+        if (YIELD_EVERY_N > 0 && chunkId % YIELD_EVERY_N === 0) {
+          await new Promise((r) => setTimeout(r, 0));
+        }
       }
     }
   }
   console.log(`[build] total chunks: ${chunkId}`);
   return chunks;
+}
+
+export async function estimateCorpusChunks(docDir = 'docs') {
+  const files = await listDocFiles(docDir);
+  let total = 0;
+  for (const filePath of files) {
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.pdf') {
+      const pages = await extractPdfPages(filePath);
+      total += pages.length;
+    } else {
+      const text = await loadTextFromFile(filePath);
+      total += chunkText(text).length;
+    }
+  }
+  return total;
 }
 
 export async function buildAndSaveIndex(docDir = 'docs') {

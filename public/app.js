@@ -3,6 +3,7 @@ const queryEl = document.getElementById('query');
 const sendBtn = document.getElementById('send');
 const ingestBtn = document.getElementById('ingest-btn');
 const statusEl = document.getElementById('status');
+const ingestBar = document.getElementById('ingest-bar');
 const providerEl = document.getElementById('provider');
 const summaryEl = document.getElementById('summary');
 const suggestionsEl = document.getElementById('suggestions');
@@ -13,6 +14,16 @@ const mainLayoutEl = document.getElementById('main-layout');
 let isSending = false;
 let selectionLocked = false;
 let selectedDocPaths = [];
+// Load default selection from server
+(async function preloadSelection() {
+  try {
+    const res = await fetch('/api/session/documents');
+    const data = await res.json();
+    if (data.success && Array.isArray(data.data?.selectedDocuments)) {
+      selectedDocPaths = data.data.selectedDocuments;
+    }
+  } catch {}
+})();
 async function refreshSelectedSummary() {
   if (!summaryEl) return;
   try {
@@ -55,16 +66,41 @@ function addMessage(role, content) {
 
 async function ingest() {
   ingestBtn.disabled = true;
-  statusEl.textContent = 'Indexing...';
+  statusEl.textContent = 'Starting...';
+  if (ingestBar) ingestBar.style.width = '0%';
   try {
-    const res = await fetch('/api/ingest', { method: 'POST' });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Ingest failed');
-    statusEl.textContent = `Indexed ${data.chunks} chunks.`;
+    const start = await fetch('/api/ingest/start', { method: 'POST' });
+    const started = await start.json();
+    if (!started.success) throw new Error(started.error || 'Failed to start');
+    statusEl.textContent = 'Scanning...';
+    const poll = async () => {
+      const resp = await fetch('/api/ingest/status');
+      const json = await resp.json();
+      const st = json.data || {};
+      const label = st.stage === 'embedding' ? 'Embedding' : st.stage === 'chunking' ? 'Chunking' : (st.stage || 'Working');
+      if (st.stage === 'error') {
+        statusEl.textContent = st.error || 'Error';
+        ingestBtn.disabled = false;
+        return;
+      }
+      if (st.stage === 'done') {
+        statusEl.textContent = `Indexed ${st.processed} chunks.`;
+        if (ingestBar) ingestBar.style.width = '100%';
+        ingestBtn.disabled = false;
+        return;
+      }
+      if (st.total > 0 && ingestBar) {
+        const pct = Math.max(0, Math.min(100, Math.round((st.processed / st.total) * 100)));
+        ingestBar.style.width = pct + '%';
+      }
+      statusEl.textContent = `${label}... ${st.processed || 0}/${st.total || 0}`;
+      setTimeout(poll, 800);
+    };
+    setTimeout(poll, 600);
   } catch (e) {
     statusEl.textContent = String(e);
   } finally {
-    ingestBtn.disabled = false;
+    // keep disabled state managed by poller end conditions
   }
 }
 
@@ -267,6 +303,7 @@ fetchSuggestions();
       const cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.value = doc.path;
+      cb.checked = selectedDocPaths.includes(doc.path);
       cb.addEventListener('change', () => {
         if (cb.checked) {
           if (!selectedDocPaths.includes(doc.path)) selectedDocPaths.push(doc.path);
@@ -280,6 +317,28 @@ fetchSuggestions();
       row.appendChild(name);
       docListEl.appendChild(row);
     });
+    // Add Select All / Clear
+    const controls = document.createElement('div');
+    controls.style.display = 'flex';
+    controls.style.gap = '8px';
+    controls.style.marginTop = '8px';
+    const selectAll = document.createElement('button');
+    selectAll.type = 'button';
+    selectAll.textContent = 'Select All';
+    selectAll.addEventListener('click', () => {
+      selectedDocPaths = data.docs.map(d => d.path);
+      docListEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+    });
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.textContent = 'Clear';
+    clear.addEventListener('click', () => {
+      selectedDocPaths = [];
+      docListEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+    });
+    controls.appendChild(selectAll);
+    controls.appendChild(clear);
+    docListEl.appendChild(controls);
   } catch (e) {
     docListEl.textContent = 'Unable to load docs.';
   }
@@ -293,6 +352,8 @@ if (lockBtn) {
       if (mainLayoutEl) mainLayoutEl.classList.add('no-docs');
       refreshSelectedSummary();
       fetchSuggestions();
+      // Persist defaults
+      fetch('/api/session/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selectedDocuments: selectedDocPaths }) });
     }
   });
 }

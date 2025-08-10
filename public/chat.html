@@ -11,6 +11,7 @@
   <div class="container">
     <nav class="topnav">
       <a href="/" class="link">← Back to Landing</a>
+      <a href="/settings.html" class="link">Settings</a>
       <span class="spacer"></span>
       <span id="provider" class="provider-badge"></span>
     </nav>
@@ -19,6 +20,9 @@
       <div class="controls">
         <button id="ingest-btn">Rebuild index from docs/</button>
         <span id="status"></span>
+        <div class="progress" aria-hidden="true" style="flex:1; max-width:280px;">
+          <div id="ingest-bar" class="progress-bar" style="width:0%"></div>
+        </div>
       </div>
     </header>
 
