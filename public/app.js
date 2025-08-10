@@ -214,7 +214,11 @@ async function send() {
 ingestBtn.addEventListener('click', ingest);
 sendBtn.addEventListener('click', send);
 queryEl.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send();
+  // Enter sends; Shift+Enter inserts newline
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
 });
 
 async function refreshProvider() {
