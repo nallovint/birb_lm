@@ -1,4 +1,4 @@
-# Technical Specification: RAG Try (Groq or Local OpenAI-compatible)
+# Technical Specification: BirbLM (Groq or Local OpenAI-compatible)
 
 ## 1. Purpose and Scope
 This application provides a minimal document chat experience with retrieval-augmented generation (RAG). It indexes local documents under `docs/`, stores an embedding index in `storage/index.json`, and serves a web UI for querying. Responses are grounded by retrieved chunks and produced by either a local OpenAI-compatible server (e.g., Ollama) or Groq (cloud), selected at runtime.

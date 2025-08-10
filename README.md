@@ -1,4 +1,4 @@
-# RAG Try – Notebook‑style Document Chat (Groq or Ollama)
+# BirbLM – Notebook‑style Document Chat (Groq or Ollama)
 
 A lightweight RAG (Retrieval‑Augmented Generation) web app to chat with documents you place in `docs/`. It supports a cloud model via Groq or a local OpenAI‑compatible model via Ollama. The app runs with Docker Compose and includes:
 
