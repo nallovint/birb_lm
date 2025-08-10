@@ -1,150 +1,143 @@
-# RAG Try – Groq or Local (OpenAI-compatible) LLM Document Chat (JavaScript)
+# RAG Try – Notebook‑style Document Chat (Groq or Ollama)
 
-This project indexes documents from the `docs/` directory and provides a lightweight web UI to discuss and analyze them using Groq or a local OpenAI-compatible LLM (e.g., Ollama, LM Studio, vLLM).
+A lightweight RAG (Retrieval‑Augmented Generation) web app to chat with documents you place in `docs/`. It supports a cloud model via Groq or a local OpenAI‑compatible model via Ollama. The app runs with Docker Compose and includes:
+
+- Settings UI for runtime provider switching (Groq/Ollama)
+- Document Manager (drag‑drop + browse uploads, delete)
+- Rebuildable vector index with live progress (in Settings and Chat)
+- Clean chat UI with citations and selectable document context
 
 ## Features
-- Ingests and indexes documents from `docs/` (PDF, DOCX, MD, TXT)
-- Local vector index (JSON) with `@xenova/transformers` embeddings (MiniLM)
-- Retrieval-augmented chat using Groq models (default: `llama-3.1-8b-instant`) or a local OpenAI-compatible server
-- Minimal web UI with rebuild-and-chat flow
-- Cites sources
+- Indexes `PDF`, `DOCX`, `MD`, and `TXT`
+- Vector embeddings via `@xenova/transformers` (MiniLM)
+- Retrieval‑augmented answers with citations (Source: filename p.N)
+- Runtime provider switching; no container restart required
+- Document selection panel locks after first message; defaults persist
 
 ## Requirements
-- Node.js 20+ (only if running locally without Docker)
-- Either: a Groq API key, or a local OpenAI-compatible server (e.g., Ollama) running
-- Docker Desktop to be installed on the machine - follow your relevant instructions at [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- Docker Desktop
+- Optional: Groq API key (cloud mode)
+- Optional: Ollama running (local mode; Compose includes an `ollama` service)
 
-## Supported File Types
-- `.pdf` (extracted via `pdfjs-dist`)
-- `.docx` (via `mammoth`)
-- `.md`, `.txt`
+## Quick Start (Docker)
 
-## How It Works
-- Text is chunked with overlap, embedded using `Xenova/all-MiniLM-L6-v2`, and stored in `storage/index.json`.
-- At chat time, the server retrieves the most relevant chunks, constructs a grounded prompt, and calls either:
-  - Groq (via SDK) if `LLM_BASE_URL` is not set, or
-  - Local OpenAI-compatible endpoint at `LLM_BASE_URL` (`/v1/chat/completions`) if provided.
-
-Note: The app can auto-detect a local OpenAI-compatible server (Ollama) or use Groq. You can also force a mode via `.env` with `LLM_MODE=ollama` or `LLM_MODE=groq`.
-
-You can run both the app and a local model via Docker Compose.
-
-### Quick start
-
-### 1. Groq (Online mode) Edit `.env` and uncomment `LLM_MODE=groq` and comment out `LLM_MODE=ollama`
+### 1) Clone and start
 ```bash
-GROQ_API_KEY=<YOUR_GROQ_KEY>
-GROQ_MODEL=llama3-8b-8192 # see information below on how to get groq key and set model
-
-# Choose ONE mode
-# LLM_MODE=ollama
-LLM_MODE=groq
-
-# If using Ollama/local OpenAI-compatible
-LLM_BASE_URL=http://ollama:11434
-LLM_MODEL=llama3.2:1b
-# LLM_MODEL=gemma2:2b     # alternate models
-# LLM_MODEL=llama3.1:8b   # you can use
-```
-
-### 1. Ollama (Local mode) Edit `.env` and and uncomment `LLM_MODE=ollama` and comment out `LLM_MODE=groq`
-```bash
-GROQ_API_KEY=<YOUR_GROQ_KEY>
-GROQ_MODEL=llama3-8b-8192 # see information below on how to get groq key and set model
-
-# Choose ONE mode
-LLM_MODE=ollama
-# LLM_MODE=groq
-
-# If using Ollama/local OpenAI-compatible
-LLM_BASE_URL=http://ollama:11434
-# LLM_MODEL=llama3.2:1b # comment this line
-# LLM_MODEL=gemma2:2b    
-LLM_MODEL=llama3.1:8b   # uncomment this line
-```
-
-### 2. Run
-
-```bash
+git clone <this-repo-url>
+cd rag_try_copy
+# Start services (app + ollama)
 docker compose up -d
-# next lines are only required if you are using a local LLM (Ollama)
-docker compose exec ollama ollama pull llama3.1:8b # or another of the models listed above in Part 1
-docker compose up -d --force-recreate app
-
-# open http://localhost:3000
 ```
-### (This command can also be used if you need to pull a new model)
 
-### 3. Library creation
+### 2) Open the app
+- Landing page: http://localhost:3000
+- Use “Settings” to choose provider and test connection
+- Use “Open App” to launch the chat UI
 
-- Copy any PDF, DOCX or TXT files into `docs/`
-- In the web UI, click the `Rebuild` button at the top to index
-
-If you wish to see progress of this, run the following in a separate terminal window:
+### 3) Choose your provider (no restart needed)
+- Settings: http://localhost:3000/settings.html
+- Groq: paste API key and set model (e.g., `llama-3.1-8b-instant`) → Test Connection → Save Settings
+- Ollama: set URL (`http://ollama:11434` in Docker, `http://localhost:11434` on host) and model (e.g., `llama3.1:8b`) → Test → Save
+- Tip (Ollama): pull the model if needed
 ```bash
+docker compose exec ollama ollama pull llama3.1:8b
+```
+
+### 4) Upload documents
+- Settings → Documents: drag & drop or browse to upload `.pdf`, `.docx`, `.md`, `.txt`
+- See your library; use “Delete” to remove files
+- During an index rebuild, uploads are disabled to avoid conflicts
+
+### 5) Rebuild the index
+- Click “Rebuild index” in Settings or the Chat header
+- Watch the progress bar through “Chunking” and “Embedding” → “Indexed N chunks”
+
+### 6) Chat
+- Chat UI: http://localhost:3000/chat.html
+- Left panel: select documents to include, then “Use selected” (locks after first message)
+- Ask questions; answers cite sources, and suggestions update
+- Rebuild progress also appears in the chat header
+
+## How it works
+- Indexing: PDFs are one chunk per page; other text is word‑window chunked with overlap; embeddings are saved to `storage/index.json`
+- Retrieval: queries are embedded and top‑K chunks are added as context; selection restricts retrieval to chosen docs
+- Settings: persisted at `storage/settings.json`, read at runtime to switch providers without restart
+
+## Environment variables (optional)
+The Settings UI covers most needs; envs below tune behavior.
+
+- Provider/Models
+  - `LLM_MODE` = `groq` | `ollama` (defaults to autodetect)
+  - `GROQ_API_KEY` (Groq)
+  - `GROQ_MODEL` (default: `llama-3.1-8b-instant`)
+  - `LLM_BASE_URL` (OpenAI‑compatible; e.g., `http://ollama:11434`)
+  - `LLM_MODEL` (default: `llama3.1:8b`)
+- Indexing/Storage
+  - `DOCS_DIR` (default: `docs`)
+  - `INDEX_DIR` (default: `storage`)
+  - `UPLOAD_MAX_BYTES` (default: 20MB)
+  - `JSON_BODY_LIMIT` (default: `30mb`)
+  - `PDF_MAX_CHARS` (default: 4000)
+  - `TXT_CHUNK_SIZE` (default: 600)
+  - `TXT_CHUNK_OVERLAP` (default: 80)
+  - `EMBED_YIELD_EVERY_N` (default: 5)
+  - `BUILD_YIELD_EVERY_N` (default: 50)
+
+## Useful commands
+```bash
+# Start/stop
+docker compose up -d
+docker compose down
+
+# Logs
 docker compose logs -f app
-```
-The UI will also show when indexing is complete and how many chunks were indexed. This is an abritrary value and only useful to the program.
-
-### 4. Go to site
-
-Head to [http://localhost:3000](http://localhost:3000)
-
-
-### If you update the `.env`, you need to run this -
-#### (You will also need to do this if you change the mode (step 1) above from Online -> Local or Local -> Online)
-
-```bash
-docker compose up -d --force-recreate app
-```
-
----------------------
-
-### Check that Ollama is running, if running locally
-
-When using Docker Compose (bundled `ollama` service):
-
-```bash
-# Service status (look for ollama: Healthy)
-docker compose ps
-
-# Ollama logs
+# (Optional) Ollama logs
 docker compose logs -f ollama
 
-# HTTP health from host
-curl -s http://localhost:11434/api/version | jq .
+# Pull/update images
+docker compose pull
 
-# From inside the ollama container
-docker compose exec ollama ollama --version
-docker compose exec ollama ollama list
-docker compose exec ollama curl -s http://localhost:11434/v1/models | jq .
-```
-
-In the app UI, the header badge shows the active provider. It will display
-“Local/OpenAI-compatible (http://ollama:11434)” when Ollama is reachable, or “Groq” when using the cloud API.
-
-### View logs and indexing progress
-
-You can watch the server logs to see indexing progress (e.g., messages like `[build] chunks so far:` and `[index] saved ...`).
-
-- With Docker Compose:
-  ```bash
-  docker compose logs -f app
-  ```
-
-### After pulling updates (rebuild)
-
-If you pulled a new version of this project or changed code locally, rebuild the app container:
-
-```bash
-# Quick rebuild and restart
+# Rebuild app image after code changes
 docker compose up -d --build app
 
-# If issues persist, do a full clean rebuild
-docker compose build --no-cache app
-docker compose up -d --force-recreate app
-
-# Verify
-docker compose logs -f app
+# Pull an Ollama model (examples)
+docker compose exec ollama ollama pull llama3.1:8b
+# or
+docker compose exec ollama ollama pull gemma2:2b
 ```
+
+## Troubleshooting
+- Provider badge shows the wrong provider
+  - In Settings, Test Connection → Save Settings; hard refresh chat page
+  - Ensure Ollama is up and reachable at the configured URL
+- Uploads fail via browse/drag‑drop
+  - Allowed: `.pdf`, `.docx`, `.md`, `.txt`; size ≤ `UPLOAD_MAX_BYTES`
+  - Check server logs: `docker compose logs -f app`
+- Rebuild progress seems stuck at “Embedding”
+  - Small corpora may finish between polls; try more/larger files
+  - Tune `EMBED_YIELD_EVERY_N=1` and `BUILD_YIELD_EVERY_N=10` if needed
+- No results in answers
+  - Rebuild after adding files; ensure correct documents were selected before first message
+- Ollama issues
+  - Check health: `docker compose ps` (should be healthy)
+  - List models: `docker compose exec ollama ollama list`
+
+## Development (without Docker)
+Requires Node.js 20+
+```bash
+npm install
+npm start
+# Visit http://localhost:3000
+```
+Notes:
+- You still need a reachable model endpoint (Ollama on `http://localhost:11434`) or a `GROQ_API_KEY`
+- First run downloads embedding weights; subsequent runs are faster
+
+## Security
+- API keys are never logged
+- Filenames are sanitized; path traversal blocked on delete
+- File types and sizes validated on upload
+
+## License
+MIT (or as provided by your repository)
 
