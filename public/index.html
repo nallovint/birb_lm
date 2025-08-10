@@ -3,56 +3,217 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Notebook-style Chat (Groq)</title>
+  <title>RAG Try – Landing</title>
   <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" />
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>📓 Notebook-style Document Chat (Groq)</h1>
-      <div class="controls">
-        <button id="ingest-btn">Rebuild index from docs/</button>
-        <span id="status"></span>
-        <span id="provider" style="margin-left: 1rem; opacity: 0.8;"></span>
-      </div>
-    </header>
-
-    <main class="layout" id="main-layout">
-      <aside id="doc-select" class="doc-select">
-        <div class="doc-select-inner">
-          <h3>Select documents</h3>
-          <div id="doc-list" class="doc-list">Loading...</div>
-          <button id="lock-selection" class="lock-btn">Use selected</button>
+  <div class="landing-hero">
+    <div class="landing-overlay"></div>
+    <div class="landing-content container">
+      <nav class="topnav">
+        <div class="brand">RAG Try</div>
+        <div class="nav-links">
+          <a href="/chat.html" class="cta">Open App</a>
         </div>
-      </aside>
-      <div class="chat-col">
-        <div id="chat"></div>
-        <div id="suggestions" style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;"></div>
-        <div class="input">
-          <textarea id="query" rows="3" placeholder="Ask a question about your documents..."></textarea>
-          <button id="send">Send</button>
+      </nav>
+      <div class="hero-inner">
+        <h1>Chat with your documents</h1>
+        <p>Index PDFs, DOCX, Markdown, and TXT, then ask grounded questions. Choose Groq or a local Ollama model.</p>
+        <div class="hero-cta">
+          <a href="/chat.html" class="btn-primary">Launch Chat</a>
+          <a href="#how-it-works" class="btn-secondary">How it works</a>
         </div>
       </div>
-      <aside id="summary-panel" class="summary-panel">
-        <div style="background:#121826; border:1px solid #1d2536; border-radius:10px; padding:12px;">
-          <h3 style="margin:0 0 8px 0;">Document Summary</h3>
-          <div id="summary" style="font-size:0.95em; opacity:0.95;">
-            Loading summary...
-          </div>
-        </div>
-      </aside>
-    </main>
+    </div>
   </div>
 
-  <!-- Markdown renderer and sanitizer -->
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <section id="how-it-works" class="container how">
+    <h2>How the UI works</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="num">1</div>
+        <h3>Rebuild index</h3>
+        <p>Click “Rebuild index from docs/” to embed and index your documents. The index is stored locally for fast retrieval.</p>
+      </div>
+      <div class="step">
+        <div class="num">2</div>
+        <h3>Select documents</h3>
+        <p>Pick one or more documents in the left panel. Once you send your first message or click “Use selected,” the selection is locked for that session.</p>
+      </div>
+      <div class="step">
+        <div class="num">3</div>
+        <h3>Ask questions</h3>
+        <p>Type your question. The assistant retrieves the most relevant chunks and answers with citations. Suggestions update as you go.</p>
+      </div>
+      <div class="step">
+        <div class="num">4</div>
+        <h3>Summaries</h3>
+        <p>The summary panel shows a concise overview of only the selected documents, refreshing when you lock your selection.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="container tech">
+    <h2>Technical details</h2>
+    <div class="tech-grid">
+      <div>
+        <h4>Embedding & Indexing</h4>
+        <p>Text is chunked with overlap and embedded using <code>Xenova/all-MiniLM-L6-v2</code>. The vector index is saved to <code>storage/index.json</code>.</p>
+      </div>
+      <div>
+        <h4>Retrieval</h4>
+        <p>At query time, we compute a query embedding and rank chunks via cosine similarity. Retrieval is restricted to your selected documents.</p>
+      </div>
+      <div>
+        <h4>LLM Provider</h4>
+        <p>Use Groq (cloud) or a local OpenAI-compatible server (e.g., Ollama). Switch via <code>LLM_MODE</code>, or let the app auto-detect.</p>
+      </div>
+      <div>
+        <h4>Streaming UX</h4>
+        <p>Responses stream with server-sent events. The UI flushes chunks intelligently at sentence boundaries and outside code fences.</p>
+      </div>
+    </div>
+    <div class="center">
+      <a href="/chat.html" class="btn-primary">Start Chatting</a>
+    </div>
+  </section>
+
+  <section id="indexing" class="container indexing">
+    <h2>Indexing details</h2>
+    <p class="muted">End-to-end pipeline: discovery → extraction → chunking → embedding → index serialization.</p>
+
+    <div class="accordion">
+      <div class="acc-item">
+        <button class="acc-header">1) Document discovery</button>
+        <div class="acc-body">
+          <p>
+            The system scans the <code>docs/</code> directory recursively for supported files: <code>.pdf</code>, <code>.docx</code>, <code>.md</code>, <code>.txt</code>.
+            Absolute paths are stored to enable precise filtering by selected documents during retrieval.
+          </p>
+          <div class="code-card"><pre><code class="language-bash"># Patterns: **/*.pdf, **/*.docx, **/*.md, **/*.txt
+# Resolves to absolute file paths
+# Function: listDocFiles(docDir)</code></pre></div>
+        </div>
+      </div>
+
+      <div class="acc-item">
+        <button class="acc-header">2) Text extraction by type</button>
+        <div class="acc-body">
+          <p><strong>PDF</strong>: Extracted per page via <code>pdfjs-dist</code>, with a per-page character cap to avoid very large pages. Each page becomes an individual chunk later.</p>
+          <p><strong>DOCX</strong>: Raw text extracted using <code>mammoth</code>.</p>
+          <p><strong>MD/TXT</strong>: Read as UTF‑8 text.</p>
+          <div class="code-card"><pre><code class="language-js">// PDF: getTextContent() → join items → trim → cap length (PDF_MAX_CHARS)
+// DOCX: mammoth.extractRawText(buffer)
+// MD/TXT: fs.readFile(..., 'utf-8')</code></pre></div>
+        </div>
+      </div>
+
+      <div class="acc-item">
+        <button class="acc-header">3) Chunking strategy</button>
+        <div class="acc-body">
+          <ul>
+            <li><strong>PDFs</strong>: exactly one chunk per page (no overlap). Ensures page-accurate citations and avoids splitting across pages.</li>
+            <li><strong>DOCX/MD/TXT</strong>: word-window chunking with overlap to preserve context across boundaries.
+              Defaults: <code>TXT_CHUNK_SIZE = 600</code> words, <code>TXT_CHUNK_OVERLAP = 80</code> words.</li>
+          </ul>
+          <p>Each chunk stores: <code>text</code>, <code>sourcePath</code> (absolute), <code>pageNumber</code> (for PDFs), <code>chunkId</code>, and <code>tokenCount</code> (approx. word count).</p>
+          <div class="code-card"><pre><code class="language-js">// Non-PDF chunking (windowed):
+while (start &lt; words.length) {
+  end = min(words.length, start + chunkSize)
+  emit(words[start..end])
+  start = end == words.length ? break : max(0, end - overlap)
+}</code></pre></div>
+        </div>
+      </div>
+
+      <div class="acc-item">
+        <button class="acc-header">4) Embedding generation</button>
+        <div class="acc-body">
+          <p>
+            Uses <code>@xenova/transformers</code> feature-extraction with the model <code>Xenova/all-MiniLM-L6-v2</code>.
+            Mean pooling with normalization yields ~384‑dimensional vectors. We embed each chunk sequentially
+            (model weights are cached to speed up subsequent runs).
+          </p>
+          <div class="code-card"><pre><code class="language-js">pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')
+emb = extractor(text, { pooling: 'mean', normalize: true })</code></pre></div>
+        </div>
+      </div>
+
+      <div class="acc-item">
+        <button class="acc-header">5) Index assembly and persistence</button>
+        <div class="acc-body">
+          <p>
+            For each chunk, we pair the embedding with metadata and serialize to <code>storage/index.json</code>:
+            <code>{ dim, items:[{ vector, text, sourcePath, pageNumber, chunkId, tokenCount }] }</code>.
+            The storage directory is ensured to exist prior to write.
+          </p>
+          <div class="code-card"><pre><code class="language-json">Index shape:
+{
+  dim: 384,
+  items: [
+    {
+      vector: number[],
+      text: string,
+      sourcePath: string,      // absolute
+      pageNumber: number|null, // PDF pages only
+      chunkId: number,
+      tokenCount: number
+    }, ...
+  ]
+}</code></pre></div>
+        </div>
+      </div>
+
+      <div class="acc-item">
+        <button class="acc-header">6) Tunables (env)</button>
+        <div class="acc-body">
+          <ul>
+            <li><code>DOCS_DIR</code> (default <code>docs</code>): source documents directory</li>
+            <li><code>INDEX_DIR</code> (default <code>storage</code>): where <code>index.json</code> is written</li>
+            <li><code>PDF_MAX_CHARS</code> (default <code>4000</code>): max characters per PDF page</li>
+            <li><code>TXT_CHUNK_SIZE</code> (default <code>600</code>) and <code>TXT_CHUNK_OVERLAP</code> (default <code>80</code>)</li>
+            <li><code>LOG_EVERY_N_ITEMS</code> (default <code>200</code>): embedding/chunking progress logging cadence</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="acc-item">
+        <button class="acc-header">7) Retrieval tie‑in</button>
+        <div class="acc-body">
+          <p>
+            At query time, we embed the user’s query with the same model and compute cosine similarity against the index items.
+            When you lock a set of documents in the UI, retrieval is filtered to only those <code>sourcePath</code> values.
+            The top‑ranked chunks are forwarded to the LLM as grounded context, and the UI renders citations from the metadata.
+          </p>
+          <div class="code-card"><pre><code class="language-js">// Cosine similarity
+// cosine(a, b) = (a·b) / (||a|| * ||b||)
+// Retrieval: searchIndex(query, k, allowedSourcePaths?) → top‑k items</code></pre></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="center" style="margin-top:18px;">
+      <a href="/chat.html" class="btn-primary">Open the App</a>
+      <a href="#top" class="btn-secondary">Back to top</a>
+    </div>
+  </section>
+
+  <footer class="container footer">
+    <a href="/readme-2.md" class="link">Quick Start</a>
+    <span class="muted">•</span>
+    <a href="/README.md" class="link">Full README</a>
+    <span class="muted">•</span>
+    <a href="/chat.html" class="link">Open App</a>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
   <script>
-    // Configure marked for GitHub-like flavor
-    if (window.marked) {
-      marked.setOptions({ gfm: true, breaks: true });
+    // Initialize HLJS for static code on landing page
+    if (window.hljs) {
+      window.addEventListener('DOMContentLoaded', () => hljs.highlightAll());
     }
   </script>
-  <script src="/app.js"></script>
+  <script src="/landing.js"></script>
 </body>
 </html>
