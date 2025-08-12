@@ -21,10 +21,12 @@ A lightweight RAG (Retrieval‑Augmented Generation) web app to chat with docume
 
 ## Quick Start (Docker)
 
+### 0) Start Docker Desktop
+
 ### 1) Clone and start
 ```bash
 git clone <this-repo-url>
-cd rag_try_copy
+cd birb_lm
 # Start services (app + ollama)
 docker compose up -d
 ```
