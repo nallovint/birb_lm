@@ -229,7 +229,7 @@ function renderDocuments() {
 }
 
 async function uploadFiles(files) {
-  const allowed = ['pdf', 'docx', 'md', 'txt'];
+  const allowed = ['pdf','docx','md','txt','html','htm','csv','tsv','log','json','jsonl','yaml','yml','ipynb','xlsx','epub','pptx'];
   const maxBytes = 20 * 1024 * 1024;
   for (const f of files) {
     const ext = (f.name.split('.').pop() || '').toLowerCase();

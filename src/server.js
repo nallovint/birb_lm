@@ -171,7 +171,7 @@ app.post('/api/documents/upload', async (req, res) => {
     const { fileName, contentBase64 } = req.body || {};
     if (!fileName || !contentBase64) return res.status(400).json({ success: false, error: 'Missing fileName or contentBase64' });
     const safe = path.basename(fileName);
-    const allowed = ['.pdf', '.docx', '.md', '.txt'];
+    const allowed = ['.pdf', '.docx', '.md', '.txt', '.html', '.htm', '.csv', '.tsv', '.log', '.json', '.jsonl', '.yaml', '.yml', '.ipynb', '.xlsx', '.epub', '.pptx'];
     const ext = path.extname(safe).toLowerCase();
     if (!allowed.includes(ext)) return res.status(400).json({ success: false, error: 'Unsupported file type' });
     const buf = Buffer.from(contentBase64, 'base64');

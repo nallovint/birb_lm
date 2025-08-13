@@ -4,6 +4,10 @@ import fg from 'fast-glob';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import mammoth from 'mammoth';
 import { pipeline } from '@xenova/transformers';
+import { htmlToText } from 'html-to-text';
+import YAML from 'yaml';
+import xlsx from 'xlsx';
+import unzipper from 'unzipper';
 
 const INDEX_DIR = process.env.INDEX_DIR ? path.resolve(process.env.INDEX_DIR) : path.resolve('storage');
 const INDEX_PATH = path.join(INDEX_DIR, 'index.json');
@@ -59,12 +63,100 @@ export async function loadTextFromFile(filePath) {
   if (ext === '.md' || ext === '.txt') {
     return await fs.readFile(filePath, 'utf-8');
   }
+  if (ext === '.html' || ext === '.htm') {
+    const raw = await fs.readFile(filePath, 'utf-8');
+    return htmlToText(raw, { wordwrap: false, selectors: [{ selector: 'a', options: { ignoreHref: true } }] });
+  }
+  if (ext === '.csv' || ext === '.tsv' || ext === '.log' || ext === '.jsonl') {
+    // Treat as plain text for simplicity
+    return await fs.readFile(filePath, 'utf-8');
+  }
+  if (ext === '.json') {
+    try {
+      const obj = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+      return JSON.stringify(obj, null, 2);
+    } catch {
+      return await fs.readFile(filePath, 'utf-8');
+    }
+  }
+  if (ext === '.yaml' || ext === '.yml') {
+    try {
+      const txt = await fs.readFile(filePath, 'utf-8');
+      const obj = YAML.parse(txt);
+      return JSON.stringify(obj, null, 2);
+    } catch {
+      return await fs.readFile(filePath, 'utf-8');
+    }
+  }
+  if (ext === '.ipynb') {
+    try {
+      const nb = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+      const cells = Array.isArray(nb.cells) ? nb.cells : [];
+      const parts = [];
+      for (const cell of cells) {
+        const src = Array.isArray(cell.source) ? cell.source.join('') : String(cell.source || '');
+        if (cell.cell_type === 'markdown') {
+          parts.push(src.trim());
+        } else if (cell.cell_type === 'code') {
+          const lang = (nb.metadata?.language_info?.name) || 'python';
+          parts.push('```' + lang + '\n' + src.trim() + '\n```');
+        }
+      }
+      return parts.join('\n\n');
+    } catch {
+      return await fs.readFile(filePath, 'utf-8');
+    }
+  }
+  if (ext === '.xlsx') {
+    try {
+      const wb = xlsx.readFile(filePath, { cellDates: false });
+      const sheets = wb.SheetNames || [];
+      const chunks = [];
+      for (const name of sheets) {
+        const ws = wb.Sheets[name];
+        if (!ws) continue;
+        const tsv = xlsx.utils.sheet_to_csv(ws, { FS: '\t' });
+        chunks.push(`# Sheet: ${name}\n${tsv}`.trim());
+      }
+      return chunks.join('\n\n');
+    } catch {
+      return '';
+    }
+  }
+  if (ext === '.epub') {
+    try {
+      const text = await extractEpubText(filePath);
+      return text;
+    } catch {
+      return '';
+    }
+  }
+  if (ext === '.pptx') {
+    try {
+      const text = await extractPptxText(filePath);
+      return text;
+    } catch {
+      return '';
+    }
+  }
   return '';
 }
 
 export async function listDocFiles(docDir = 'docs') {
   const base = path.resolve(docDir);
-  const patterns = ['**/*.pdf', '**/*.docx', '**/*.md', '**/*.txt'];
+  const patterns = [
+    '**/*.pdf',
+    '**/*.docx',
+    '**/*.md',
+    '**/*.txt',
+    '**/*.html', '**/*.htm',
+    '**/*.csv', '**/*.tsv', '**/*.log', '**/*.jsonl',
+    '**/*.json', '**/*.yaml', '**/*.yml',
+    '**/*.ipynb',
+    '**/*.xlsx',
+    '**/*.epub',
+    '**/*.pptx',
+  ];
   const files = await fg(patterns, { cwd: base, dot: false, onlyFiles: true, absolute: true });
   return files;
 }
@@ -236,4 +328,59 @@ export async function buildAndSaveIndex(docDir = 'docs') {
   await saveIndex(index);
   console.log(`[index] saved ${items.length} items to ${INDEX_PATH}`);
   return index;
+}
+
+async function extractEpubText(filePath) {
+  const { default: EPUB } = await import('epub');
+  return await new Promise((resolve, reject) => {
+    try {
+      const epub = new EPUB(filePath);
+      const parts = [];
+      epub.on('error', (err) => reject(err));
+      epub.on('end', () => {
+        const items = Array.isArray(epub.flow) ? epub.flow : [];
+        if (!items.length) return resolve(parts.join('\n\n'));
+        let done = 0;
+        for (const it of items) {
+          epub.getChapterRaw(it.id, (err, html) => {
+            if (!err && html) {
+              const txt = htmlToText(html, { wordwrap: false, selectors: [{ selector: 'a', options: { ignoreHref: true } }] });
+              parts.push(txt.trim());
+            }
+            done += 1;
+            if (done === items.length) resolve(parts.join('\n\n'));
+          });
+        }
+      });
+      epub.parse();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+async function extractPptxText(filePath) {
+  const dir = await unzipper.Open.file(filePath);
+  const slideFiles = dir.files
+    .filter((f) => /^ppt\/slides\/slide\d+\.xml$/i.test(f.path))
+    .sort((a, b) => {
+      const na = Number((a.path.match(/slide(\d+)\.xml/i) || [])[1] || 0);
+      const nb = Number((b.path.match(/slide(\d+)\.xml/i) || [])[1] || 0);
+      return na - nb;
+    });
+  const slides = [];
+  for (let i = 0; i < slideFiles.length; i++) {
+    const entry = slideFiles[i];
+    const buf = await entry.buffer();
+    const xml = buf.toString('utf-8');
+    const texts = [];
+    const re = /<a:t>([\s\S]*?)<\/a:t>/g;
+    let m;
+    while ((m = re.exec(xml)) !== null) {
+      texts.push(m[1]);
+    }
+    const slideText = texts.join(' ').replace(/[\s\u00A0]+/g, ' ').trim();
+    if (slideText) slides.push(`Slide ${i + 1}:\n${slideText}`);
+  }
+  return slides.join('\n\n');
 }
