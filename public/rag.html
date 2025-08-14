@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BirbLM • RAG</title>
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css" />
+</head>
+<body>
+  <div class="landing-hero">
+    <div class="landing-overlay"></div>
+    <div class="landing-content container">
+      <nav class="topnav">
+        <div class="brand">BirbLM</div>
+        <div class="nav-links">
+          <a href="/" class="link">Landing</a>
+          <a href="/chat.html" class="link">Chat</a>
+          <a href="/settings.html" class="link">Settings</a>
+          <a href="/rag.html" class="link active" aria-current="page">RAG</a>
+          <a href="/help.html" class="link">Help</a>
+        </div>
+      </nav>
+      <div class="hero-inner">
+        <h1>RAG: Retrieval‑Augmented Generation</h1>
+        <p>How BirbLM grounds answers in your documents: ingest → chunk & embed → index → retrieve → generate with citations.</p>
+        <div class="hero-cta">
+          <a href="/chat.html" class="btn-primary">Open Chat</a>
+          <a href="#pipeline" class="btn-secondary">See the pipeline</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section id="pipeline" class="container how">
+    <h2>End‑to‑end pipeline</h2>
+    <div class="steps">
+      <div class="step"><div class="num">1</div><h3>Ingest</h3><p>Scan <code>docs/</code> and extract text from PDF, DOCX, MD, and TXT.</p></div>
+      <div class="step"><div class="num">2</div><h3>Chunk</h3><p>PDFs are one chunk per page; other text uses overlapping word windows.</p></div>
+      <div class="step"><div class="num">3</div><h3>Embed</h3><p>Generate 384‑d vectors via <code>@xenova/transformers</code> (<code>Xenova/all-MiniLM-L6-v2</code>).</p></div>
+      <div class="step"><div class="num">4</div><h3>Index</h3><p>Persist vectors and metadata to <code>storage/index.json</code>.</p></div>
+    </div>
+  </section>
+
+  <section class="container tech">
+    <h2>How BirbLM uses RAG</h2>
+    <div class="tech-grid">
+      <div>
+        <h4>Chunking strategy</h4>
+        <p>Balanced for precision and context continuity. PDFs map to pages for page‑accurate citations.</p>
+        <div class="code-card"><pre><code class="language-js">// Non-PDF chunking (windowed with overlap)
+while (start &lt; words.length) {
+  const end = Math.min(words.length, start + chunkSize);
+  const chunk = words.slice(start, end);
+  emit(chunk.join(' '));
+  if (end === words.length) break;
+  start = Math.max(0, end - overlap);
+}</code></pre></div>
+      </div>
+      <div>
+        <h4>Embedding</h4>
+        <p>Mean‑pooled, normalized vectors for cosine similarity search.</p>
+        <div class="code-card"><pre><code class="language-js">import { pipeline } from '@xenova/transformers';
+
+const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+const emb = await extractor(text, { pooling: 'mean', normalize: true });</code></pre></div>
+      </div>
+      <div>
+        <h4>Retrieval</h4>
+        <p>Rank by cosine similarity, filtered to your selected documents in the UI.</p>
+        <div class="code-card"><pre><code class="language-js">// Cosine similarity
+// cosine(a,b) = (a·b) / (||a|| * ||b||)
+const results = await searchIndex(query, 6, selectedDocs);</code></pre></div>
+      </div>
+      <div>
+        <h4>Prompt composition</h4>
+        <p>Top‑K snippets become grounded context. The assistant replies only using these snippets and cites sources.</p>
+        <div class="code-card"><pre><code class="language-js">const contextLines = results.map(({ item }) =&gt; {
+  const name = path.basename(item.sourcePath);
+  const page = item.pageNumber ? ` p.${item.pageNumber}` : '';
+  return `[src=${name}${page}#${item.chunkId}] ${item.text.slice(0, 1000)}`;
+});
+
+const system = `Answer using ONLY the provided context.\n` +
+  `Cite as (Source: filename.ext p.N).`;</code></pre></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="container indexing">
+    <h2>Index structure</h2>
+    <p class="muted">Compact JSON index persisted locally for fast startup and transparent storage.</p>
+    <div class="code-card"><pre><code class="language-json">{
+  "dim": 384,
+  "items": [
+    {
+      "vector": number[],
+      "text": string,
+      "sourcePath": string,
+      "pageNumber": number | null,
+      "chunkId": number,
+      "tokenCount": number
+    }
+  ]
+}</code></pre></div>
+  </section>
+
+  <section class="container tech">
+    <h2>End‑user experience</h2>
+    <div class="tech-grid">
+      <div>
+        <h4>Streaming UI</h4>
+        <p>Server‑sent events stream responses. The UI flushes at sentence boundaries and outside code fences.</p>
+        <div class="code-card"><pre><code class="language-js">// Server emits SSE events: delta, flush, done
+res.write(`event: delta\n`);
+res.write(`data: ${JSON.stringify({ text })}\n\n`);</code></pre></div>
+      </div>
+      <div>
+        <h4>Quick start</h4>
+        <p>Run with Docker, rebuild the index, and chat.</p>
+        <div class="code-card"><pre><code class="language-bash">docker compose up -d
+open http://localhost:3000
+# Upload files in Settings → Rebuild index → Chat</code></pre></div>
+      </div>
+    </div>
+    <div class="center">
+      <a href="/chat.html" class="btn-primary">Try it now</a>
+    </div>
+  </section>
+
+  <footer class="container footer">
+    <a href="/help.html" class="link">Help</a>
+    <span class="muted">•</span>
+    <a href="/chat.html" class="link">Open App</a>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
+  <script>
+    if (window.hljs) {
+      window.addEventListener('DOMContentLoaded', () => hljs.highlightAll());
+    }
+  </script>
+  <script src="/landing.js"></script>
+</body>
+</html>
+
+
