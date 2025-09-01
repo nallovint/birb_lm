@@ -14,6 +14,11 @@ const mainLayoutEl = document.getElementById('main-layout');
 let isSending = false;
 let selectionLocked = false;
 let selectedDocPaths = [];
+// Control Send button availability
+function updateSendEnabled() {
+  const canSend = selectionLocked && selectedDocPaths.length > 0 && !isSending;
+  if (sendBtn) sendBtn.disabled = !canSend;
+}
 // Load default selection from server
 (async function preloadSelection() {
   try {
@@ -23,6 +28,7 @@ let selectedDocPaths = [];
       selectedDocPaths = data.data.selectedDocuments;
     }
   } catch {}
+  updateSendEnabled();
 })();
 async function refreshSelectedSummary() {
   if (!summaryEl) return;
@@ -106,18 +112,13 @@ async function ingest() {
 
 async function send() {
   if (isSending) return;
+  // Require explicit selection lock and at least one selected doc
+  if (!selectionLocked || selectedDocPaths.length === 0) {
+    updateSendEnabled();
+    return;
+  }
   const q = queryEl.value.trim();
   if (!q) return;
-
-  // On first send, lock the selection panel and hide it
-  if (!selectionLocked) {
-    selectionLocked = true;
-    if (docSelectPanel) docSelectPanel.style.display = 'none';
-    if (mainLayoutEl) mainLayoutEl.classList.add('no-docs');
-    // Refresh summary and suggestions immediately based on locked selection
-    refreshSelectedSummary();
-    fetchSuggestions();
-  }
 
   // Push and display user message
   conversationHistory.push({ role: 'user', content: q });
@@ -126,7 +127,7 @@ async function send() {
 
   // Lock UI
   isSending = true;
-  sendBtn.disabled = true;
+  updateSendEnabled();
 
   // Streaming via SSE
   let holder = document.createElement('div');
@@ -207,7 +208,7 @@ async function send() {
     conversationHistory.push({ role: 'assistant', content: String(e) });
   } finally {
     isSending = false;
-    sendBtn.disabled = false;
+    updateSendEnabled();
   }
 }
 
@@ -314,6 +315,7 @@ fetchSuggestions();
         } else {
           selectedDocPaths = selectedDocPaths.filter((p) => p !== doc.path);
         }
+        updateSendEnabled();
       });
       const name = document.createElement('span');
       name.textContent = doc.name;
@@ -332,6 +334,7 @@ fetchSuggestions();
     selectAll.addEventListener('click', () => {
       selectedDocPaths = data.docs.map(d => d.path);
       docListEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+      updateSendEnabled();
     });
     const clear = document.createElement('button');
     clear.type = 'button';
@@ -339,6 +342,7 @@ fetchSuggestions();
     clear.addEventListener('click', () => {
       selectedDocPaths = [];
       docListEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+      updateSendEnabled();
     });
     controls.appendChild(selectAll);
     controls.appendChild(clear);
@@ -350,14 +354,19 @@ fetchSuggestions();
 
 if (lockBtn) {
   lockBtn.addEventListener('click', () => {
-    if (!selectionLocked) {
+    // Lock only when at least one document is selected
+    if (selectedDocPaths.length > 0) {
       selectionLocked = true;
       if (docSelectPanel) docSelectPanel.style.display = 'none';
       if (mainLayoutEl) mainLayoutEl.classList.add('no-docs');
       refreshSelectedSummary();
       fetchSuggestions();
-      // Persist defaults
       fetch('/api/session/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selectedDocuments: selectedDocPaths }) });
+    } else {
+      selectionLocked = false;
+      if (docSelectPanel) docSelectPanel.style.display = '';
+      if (mainLayoutEl) mainLayoutEl.classList.remove('no-docs');
     }
+    updateSendEnabled();
   });
 }
