@@ -180,15 +180,25 @@ if (newChatBtn) {
 }
 
 // Cache server start time to invalidate client history on server restart
-(function cacheBootOnce(){
+// Sync server boot marker and clear stale client chat state on restart
+(async function syncBootMarkerAndHistory() {
   try {
-    const boot = window.localStorage.getItem(LS_BOOT_KEY);
-    if (!boot) {
-      fetch('/api/status').then(r=>r.json()).then(d=>{ if (d?.startedAt) window.localStorage.setItem(LS_BOOT_KEY, d.startedAt); }).catch(()=>{});
+    const res = await fetch('/api/status');
+    const data = await res.json();
+    const startedAt = data?.startedAt;
+    if (startedAt) {
+      const prev = window.localStorage.getItem(LS_BOOT_KEY);
+      if (prev && prev !== startedAt) {
+        // Server restarted → clear client-side chat caches
+        try { window.localStorage.removeItem(LS_CHATS_KEY); } catch {}
+        try { window.localStorage.removeItem('birblm:history'); } catch {}
+      }
+      window.localStorage.setItem(LS_BOOT_KEY, startedAt);
     }
   } catch {}
+  // After potential clear, render current history
+  renderHistory();
 })();
-renderHistory();
 
 function addMessage(role, content) {
   const div = document.createElement('div');
