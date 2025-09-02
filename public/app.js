@@ -9,11 +9,18 @@ const summaryEl = document.getElementById('summary');
 const suggestionsEl = document.getElementById('suggestions');
 const docListEl = document.getElementById('doc-list');
 const lockBtn = document.getElementById('lock-selection');
-const docSelectPanel = document.getElementById('doc-select');
+const docSelectPanel = document.getElementById('doc-select-block');
 const mainLayoutEl = document.getElementById('main-layout');
+const historyListEl = document.getElementById('history-list');
+const newChatBtn = document.getElementById('new-chat');
 let isSending = false;
 let selectionLocked = false;
 let selectedDocPaths = [];
+// Control Send button availability
+function updateSendEnabled() {
+  const canSend = selectionLocked && selectedDocPaths.length > 0 && !isSending;
+  if (sendBtn) sendBtn.disabled = !canSend;
+}
 // Load default selection from server
 (async function preloadSelection() {
   try {
@@ -23,6 +30,7 @@ let selectedDocPaths = [];
       selectedDocPaths = data.data.selectedDocuments;
     }
   } catch {}
+  updateSendEnabled();
 })();
 async function refreshSelectedSummary() {
   if (!summaryEl) return;
@@ -50,6 +58,147 @@ async function refreshSelectedSummary() {
 // In-memory conversation history for multi-turn
 // Each item: { role: 'user'|'assistant', content: string }
 const conversationHistory = [];
+
+// Multi-chat (local-only) storage
+let currentChatId = null;
+const LS_CHATS_KEY = 'birblm:chats';
+const LS_BOOT_KEY = 'birblm:serverStart';
+
+function generateId() {
+  return 'c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function loadChats() {
+  try {
+    const raw = window.localStorage.getItem(LS_CHATS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    // Backward-compat for older simple history arrays
+    if (Array.isArray(parsed)) return parsed;
+    return [];
+  } catch { return []; }
+}
+
+function saveChats(list) {
+  try { window.localStorage.setItem(LS_CHATS_KEY, JSON.stringify(list || [])); } catch {}
+}
+
+function upsertCurrentChat() {
+  // Create a snapshot of the current session into chats array
+  const list = loadChats();
+  if (!currentChatId) currentChatId = generateId();
+  const firstUser = conversationHistory.find((m) => m.role === 'user');
+  const title = (firstUser?.content || '').slice(0, 60) || '(untitled)';
+  const now = new Date().toISOString();
+  const idx = list.findIndex((c) => c.id === currentChatId);
+  const entry = {
+    id: currentChatId,
+    title,
+    updatedAt: now,
+    selectedDocs: [...selectedDocPaths],
+    locked: selectionLocked,
+    messages: [...conversationHistory],
+  };
+  if (idx >= 0) list[idx] = entry; else list.push(entry);
+  saveChats(list);
+}
+
+function renderHistory() {
+  if (!historyListEl) return;
+  const list = loadChats();
+  historyListEl.innerHTML = '';
+  if (!list.length) { historyListEl.textContent = 'No history yet.'; return; }
+  // Sort by updatedAt desc
+  list.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+  for (const h of list) {
+    const item = document.createElement('div');
+    item.className = 'history-item';
+    const left = document.createElement('div'); left.className = 'title'; left.textContent = h.title || '(untitled)';
+    const right = document.createElement('div'); right.className = 'muted';
+    try { right.textContent = new Date(h.updatedAt).toLocaleString(); } catch { right.textContent = ''; }
+    item.appendChild(left); item.appendChild(right);
+    item.addEventListener('click', () => loadChatById(h.id));
+    historyListEl.appendChild(item);
+  }
+}
+
+function renderConversationFromMessages(messages) {
+  chat.innerHTML = '';
+  for (const m of messages || []) addMessage(m.role, m.content);
+}
+
+function applySelectionToUI() {
+  if (!docListEl) return;
+  docListEl.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    cb.checked = selectedDocPaths.includes(cb.value);
+  });
+}
+
+function loadChatById(chatId) {
+  const list = loadChats();
+  const found = list.find((c) => c.id === chatId);
+  if (!found) return;
+  // Replace current session state
+  currentChatId = found.id;
+  selectionLocked = !!found.locked;
+  selectedDocPaths = Array.isArray(found.selectedDocs) ? [...found.selectedDocs] : [];
+  // replace conversationHistory contents in-place
+  conversationHistory.length = 0;
+  for (const m of found.messages || []) conversationHistory.push({ role: m.role, content: m.content });
+
+  // Render conversation
+  renderConversationFromMessages(conversationHistory);
+
+  // Apply selection UI
+  if (selectionLocked) {
+    if (docSelectPanel) docSelectPanel.style.display = 'none';
+    if (mainLayoutEl) mainLayoutEl.classList.add('no-docs');
+  } else {
+    if (docSelectPanel) docSelectPanel.style.display = '';
+    if (mainLayoutEl) mainLayoutEl.classList.remove('no-docs');
+  }
+  applySelectionToUI();
+  refreshSelectedSummary();
+  fetchSuggestions();
+  updateSendEnabled();
+}
+if (newChatBtn) {
+  newChatBtn.addEventListener('click', () => {
+    // Start fresh: clear conversation and selection lock, keep selections optional
+    currentChatId = null;
+    conversationHistory.length = 0;
+    chat.innerHTML = '';
+    // Show document selection again
+    selectionLocked = false;
+    if (docSelectPanel) docSelectPanel.style.display = '';
+    if (mainLayoutEl) mainLayoutEl.classList.remove('no-docs');
+    // Keep previous selections or clear them: here we keep them to speed up flow
+    applySelectionToUI();
+    refreshSelectedSummary();
+    fetchSuggestions();
+    updateSendEnabled();
+  });
+}
+
+// Cache server start time to invalidate client history on server restart
+// Sync server boot marker and clear stale client chat state on restart
+(async function syncBootMarkerAndHistory() {
+  try {
+    const res = await fetch('/api/status');
+    const data = await res.json();
+    const startedAt = data?.startedAt;
+    if (startedAt) {
+      const prev = window.localStorage.getItem(LS_BOOT_KEY);
+      if (prev && prev !== startedAt) {
+        // Server restarted → clear client-side chat caches
+        try { window.localStorage.removeItem(LS_CHATS_KEY); } catch {}
+        try { window.localStorage.removeItem('birblm:history'); } catch {}
+      }
+      window.localStorage.setItem(LS_BOOT_KEY, startedAt);
+    }
+  } catch {}
+  // After potential clear, render current history
+  renderHistory();
+})();
 
 function addMessage(role, content) {
   const div = document.createElement('div');
@@ -106,18 +255,13 @@ async function ingest() {
 
 async function send() {
   if (isSending) return;
+  // Require explicit selection lock and at least one selected doc
+  if (!selectionLocked || selectedDocPaths.length === 0) {
+    updateSendEnabled();
+    return;
+  }
   const q = queryEl.value.trim();
   if (!q) return;
-
-  // On first send, lock the selection panel and hide it
-  if (!selectionLocked) {
-    selectionLocked = true;
-    if (docSelectPanel) docSelectPanel.style.display = 'none';
-    if (mainLayoutEl) mainLayoutEl.classList.add('no-docs');
-    // Refresh summary and suggestions immediately based on locked selection
-    refreshSelectedSummary();
-    fetchSuggestions();
-  }
 
   // Push and display user message
   conversationHistory.push({ role: 'user', content: q });
@@ -126,7 +270,7 @@ async function send() {
 
   // Lock UI
   isSending = true;
-  sendBtn.disabled = true;
+  updateSendEnabled();
 
   // Streaming via SSE
   let holder = document.createElement('div');
@@ -189,6 +333,8 @@ async function send() {
               if (acc && acc.trim().length) {
                 conversationHistory.push({ role: 'assistant', content: acc });
               }
+              // Upsert to multi-chat storage
+              try { upsertCurrentChat(); renderHistory(); } catch {}
               // Refresh suggestions after each assistant reply
               fetchSuggestions();
             } else if (event === 'error') {
@@ -207,7 +353,7 @@ async function send() {
     conversationHistory.push({ role: 'assistant', content: String(e) });
   } finally {
     isSending = false;
-    sendBtn.disabled = false;
+    updateSendEnabled();
   }
 }
 
@@ -314,6 +460,7 @@ fetchSuggestions();
         } else {
           selectedDocPaths = selectedDocPaths.filter((p) => p !== doc.path);
         }
+        updateSendEnabled();
       });
       const name = document.createElement('span');
       name.textContent = doc.name;
@@ -332,6 +479,7 @@ fetchSuggestions();
     selectAll.addEventListener('click', () => {
       selectedDocPaths = data.docs.map(d => d.path);
       docListEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+      updateSendEnabled();
     });
     const clear = document.createElement('button');
     clear.type = 'button';
@@ -339,6 +487,7 @@ fetchSuggestions();
     clear.addEventListener('click', () => {
       selectedDocPaths = [];
       docListEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+      updateSendEnabled();
     });
     controls.appendChild(selectAll);
     controls.appendChild(clear);
@@ -350,14 +499,33 @@ fetchSuggestions();
 
 if (lockBtn) {
   lockBtn.addEventListener('click', () => {
-    if (!selectionLocked) {
-      selectionLocked = true;
-      if (docSelectPanel) docSelectPanel.style.display = 'none';
-      if (mainLayoutEl) mainLayoutEl.classList.add('no-docs');
-      refreshSelectedSummary();
-      fetchSuggestions();
-      // Persist defaults
-      fetch('/api/session/documents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selectedDocuments: selectedDocPaths }) });
+    // Toggle behavior: if locked, unlock; if unlocked, lock only with selection
+    if (selectionLocked) {
+      // Unlock: show selection UI and allow changes; keep selection as-is
+      selectionLocked = false;
+      if (docSelectPanel) docSelectPanel.style.display = '';
+      if (mainLayoutEl) mainLayoutEl.classList.remove('no-docs');
+      // Optionally clear selection here if desired (kept intact by default)
+    } else {
+      // Lock only when at least one document is selected
+      if (selectedDocPaths.length > 0) {
+        selectionLocked = true;
+        if (docSelectPanel) docSelectPanel.style.display = 'none';
+        if (mainLayoutEl) mainLayoutEl.classList.add('no-docs');
+        refreshSelectedSummary();
+        fetchSuggestions();
+        fetch('/api/session/documents', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ selectedDocuments: selectedDocPaths })
+        });
+      } else {
+        // No selection → remain unlocked and keep panel visible
+        selectionLocked = false;
+        if (docSelectPanel) docSelectPanel.style.display = '';
+        if (mainLayoutEl) mainLayoutEl.classList.remove('no-docs');
+      }
     }
+    updateSendEnabled();
   });
 }

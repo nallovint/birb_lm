@@ -17,19 +17,29 @@ textarea { flex: 1; border-radius: 8px; border: 1px solid #1d2536; background: #
 .msg.assistant a { color: #8ab4ff; }
 
 /* Responsive three-column layout using percentages */
-.layout { display: grid; grid-template-columns: 22% 1fr 26%; gap: 18px; align-items: start; }
-.layout.no-docs { grid-template-columns: 1fr 28%; }
+.layout { display: grid; grid-template-columns: 20% 1fr 26%; gap: 18px; align-items: start; }
+.layout.no-docs { grid-template-columns: 20% 1fr 26%; }
 .chat-col { min-width: 0; }
 .summary-panel { position: sticky; top: 16px; }
 .summary-panel > div { max-height: 60vh; overflow-y: auto; }
 
 /* Document selection panel */
-.doc-select { position: sticky; top: 16px; }
+.doc-select { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 12px; }
 .doc-select-inner { background:#121826; border:1px solid #1d2536; border-radius:10px; padding:12px; }
 .doc-list { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; margin: 8px 0; }
 .doc-item { display:flex; align-items:center; gap:8px; font-size: 0.95em; }
 .doc-item input { accent-color: #2a5bd7; }
 .lock-btn { width: 100%; }
+.history-pane { margin-top: 12px; border-top:1px dashed #1d2536; padding-top:10px; }
+.history-list { display:flex; flex-direction: column; gap:6px; max-height: 30vh; overflow-y:auto; scrollbar-color: #2a5bd7 #0b0f17; scrollbar-width: thin; }
+.history-list::-webkit-scrollbar { width: 10px; }
+.history-list::-webkit-scrollbar-thumb { background-color: #2a5bd7; border-radius: 8px; border: 2px solid #0d1320; }
+.history-list::-webkit-scrollbar-track { background: #0b0f17; }
+
+/* When docs are hidden, give history more vertical space */
+.layout.no-docs .history-list { max-height: 70vh; }
+.history-item { display:flex; align-items:center; justify-content: space-between; gap:8px; padding:8px; border:1px solid #1d2536; border-radius:8px; background:#0d1320; cursor:pointer; }
+.history-item .title { font-size:0.95em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
 @media (max-width: 980px) {
   .layout { grid-template-columns: 100%; }

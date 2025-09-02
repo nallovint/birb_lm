@@ -33,11 +33,18 @@
     </header>
 
     <main class="layout" id="main-layout">
-      <aside id="doc-select" class="doc-select">
-        <div class="doc-select-inner">
+      <aside id="sidebar-col" class="doc-select">
+        <div id="doc-select-block" class="doc-select-inner">
           <h3>Select documents</h3>
           <div id="doc-list" class="doc-list">Loading...</div>
           <button id="lock-selection" class="lock-btn">Use selected</button>
+        </div>
+        <div id="history-pane" class="history-pane">
+          <div style="display:flex; align-items:center; justify-content: space-between; gap:8px;">
+            <h4 style="margin:10px 0 6px 0;">Recent Chats</h4>
+            <button id="new-chat" class="btn-secondary" type="button" title="Start a new chat">New Chat</button>
+          </div>
+          <div id="history-list" class="history-list">No history yet.</div>
         </div>
       </aside>
       <div class="chat-col">
