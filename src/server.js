@@ -16,6 +16,8 @@ const app = express();
 app.use(cors());
 // Increase JSON limit to support base64 uploads up to ~20MB
 app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '30mb' }));
+// Server boot marker for client-side cache invalidation
+const serverStartedAt = new Date().toISOString();
 
 // Static UI
 const publicDir = path.resolve(__dirname, '../public');
@@ -430,7 +432,7 @@ app.post('/api/suggest', async (req, res) => {
 app.get('/api/status', async (req, res) => {
   try {
     const info = await getProviderInfo();
-    res.json({ ok: true, ...info });
+    res.json({ ok: true, startedAt: serverStartedAt, ...info });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
   }
