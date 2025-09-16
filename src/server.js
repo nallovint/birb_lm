@@ -363,7 +363,7 @@ app.post('/api/suggest', async (req, res) => {
       context = snippets.join('\n\n');
     }
 
-    const system = 'You are assisting a user exploring a document corpus. Propose three concise, high-signal questions grounded in the provided context. Ensure each question is unique and does NOT repeat or lightly paraphrase the user\'s recent questions. Output ONLY a JSON array of 3 strings. Do not include any extra text.';
+    const system = 'You are assisting a user exploring a document corpus. Propose exactly three concise, high-signal follow-up questions grounded in the provided context. Each question must be unique, non-overlapping, and must NOT repeat or lightly paraphrase the user\'s recent questions. Keep each question under 22 words. Output ONLY a JSON array of 3 strings — no extra text.';
     const convo = recent.map((m) => `- ${m.role}: ${m.content}`).join('\n') || '(no prior conversation)';
     const user = `CONTEXT:\n${context}\n\nRECENT CONVERSATION (may be empty):\n${convo}\n\nTask: Propose three helpful, distinct questions that do not repeat what was just asked.`;
 
@@ -579,12 +579,28 @@ app.post('/api/chat', async (req, res) => {
       : '';
     const context = [historyContext, ...contextLines].filter(Boolean).join('\n\n');
 
-    const system = `You are an expert research assistant. Answer using ONLY the provided context. If the answer is not in the snippets, say you don't have enough information.
-    Citations: Use exactly the format (Source: filename.ext p.N). Do not include URLs or paths in citations. Do not invent sources.
-    Respond in Markdown with clear headings, lists, and code blocks when helpful. Be concise.`;
+    const system = `You are an expert research assistant.
+
+Grounding
+- Use ONLY the supplied Context block (and "Previous answer excerpt" if present).
+- Do NOT use outside knowledge. If the context is insufficient, say: "I don’t have enough information to answer from the provided context." Optionally ask one targeted follow-up.
+
+Citations
+- Cite every claim supported by a snippet.
+- Format citations exactly as: (Source: filename.ext) or (Source: filename.ext p.N) when a page number is shown.
+- Place citations at the end of the sentence(s) they support.
+- If multiple sources support a sentence, include them space-separated, e.g., (Source: a.pdf p.3) (Source: b.md).
+- Never include URLs or paths. Never invent sources or page numbers.
+
+Style
+- Output Markdown.
+- Start with a 1–2 sentence answer, then details.
+- Use clear headings and bullets when helpful; use code blocks for code.
+- Be concise and high-signal; avoid repetition.
+- If snippets conflict, note the discrepancy and cite each source.`;
     const user = contextLines.length
-      ? `Context:\n${context}\n\nQuestion: ${query}\n\nInstructions: Use only the context. If missing info, say so. Cite sources using (Source: filename.ext p.N). Respond in Markdown.`
-      : `Question: ${query}\n\nRespond in Markdown.`;
+      ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Base the answer only on the Context above.\n- If info is missing, say so and (optionally) ask one clarifying question.\n- Use citations in the form (Source: filename.ext) or (Source: filename.ext p.N) at sentence end.`
+      : `Question:\n${query}\n\nInstructions:\n- Answer in Markdown.\n- If info is missing, say so.\n- Use citations when applicable.`;
 
     const historyMessages = sanitizeHistory(rawHistory);
     console.log(`[chat] history messages used: ${historyMessages.length}`);
