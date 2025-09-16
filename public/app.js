@@ -1,6 +1,7 @@
 const chat = document.getElementById('chat');
 const queryEl = document.getElementById('query');
 const sendBtn = document.getElementById('send');
+const allowOutsideEl = document.getElementById('allow-outside');
 const ingestBtn = document.getElementById('ingest-btn');
 const statusEl = document.getElementById('status');
 const ingestBar = document.getElementById('ingest-bar');
@@ -283,7 +284,7 @@ async function send() {
     const res = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: q, history: conversationHistory, selectedDocs: selectedDocPaths }),
+      body: JSON.stringify({ query: q, history: conversationHistory, selectedDocs: selectedDocPaths, allowOutsideKnowledge: !!(allowOutsideEl && allowOutsideEl.checked) }),
     });
     if (!res.ok || !res.body) throw new Error('Streaming not available');
     const reader = res.body.getReader();

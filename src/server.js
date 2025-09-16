@@ -524,8 +524,8 @@ function chunkMarkdown(text, maxLen = 1200) {
 }
 
 // Conversation history limits
-const HISTORY_MAX_MESSAGES = Number(process.env.HISTORY_MAX_MESSAGES || 8); // total messages (user+assistant)
-const HISTORY_CHAR_BUDGET = Number(process.env.HISTORY_CHAR_BUDGET || 6000); // approximate char budget
+const HISTORY_MAX_MESSAGES = Number(process.env.HISTORY_MAX_MESSAGES || 12); // total messages (user+assistant)
+const HISTORY_CHAR_BUDGET = Number(process.env.HISTORY_CHAR_BUDGET || 12000); // approximate char budget
 
 function sanitizeHistory(raw) {
   if (!Array.isArray(raw)) return [];
@@ -555,7 +555,7 @@ function sanitizeHistory(raw) {
 
 app.post('/api/chat', async (req, res) => {
   try {
-    const { query, history: rawHistory, selectedDocs } = req.body || {};
+    const { query, history: rawHistory, selectedDocs, allowOutsideKnowledge } = req.body || {};
     if (!query) return res.status(400).json({ ok: false, error: 'Missing query' });
 
     // Augment retrieval with last assistant answer excerpt (if any)
@@ -565,12 +565,12 @@ app.post('/api/chat', async (req, res) => {
     const assistantExcerpt = lastAssistant ? lastAssistant.content.slice(0, excerptLen) : '';
     const retrievalQuery = assistantExcerpt ? `${assistantExcerpt} \n\n${query}` : query;
 
-    const results = await searchIndex(retrievalQuery, 6, Array.isArray(selectedDocs) && selectedDocs.length ? selectedDocs : null);
+    const results = await searchIndex(retrievalQuery, 12, Array.isArray(selectedDocs) && selectedDocs.length ? selectedDocs : null);
 
     const contextLines = results.map(({ item }) => {
       const name = path.basename(item.sourcePath);
       const pageLabel = item.pageNumber ? ` p.${item.pageNumber}` : '';
-      const snippet = item.text.slice(0, 1000);
+      const snippet = item.text.slice(0, 2000);
       return `[src=${name}${pageLabel}#${item.chunkId}] ${snippet}`;
     });
 
@@ -579,7 +579,30 @@ app.post('/api/chat', async (req, res) => {
       : '';
     const context = [historyContext, ...contextLines].filter(Boolean).join('\n\n');
 
-    const system = `You are an expert research assistant.
+    let system;
+    let user;
+    if (allowOutsideKnowledge) {
+      system = `You are an expert research assistant.
+
+Grounding
+- Use the supplied Context block when relevant; you MAY use your general knowledge to fill gaps.
+- If the context is insufficient for the question, answer from your knowledge. Do not fabricate citations.
+
+Citations
+- When a claim is supported by a provided snippet, cite it using: (Source: filename.ext) or (Source: filename.ext p.N).
+- Do not cite external knowledge. Never invent sources or page numbers.
+
+Style
+- Output Markdown.
+- Start with a 1–2 sentence answer, then details.
+- Use clear headings and bullets when helpful; use code blocks for code.
+- Be concise and high-signal; avoid repetition.
+- If snippets conflict, note the discrepancy and cite each source.`;
+      user = contextLines.length
+        ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Prefer the Context above when relevant; you may use general knowledge to fill gaps.\n- Cite only statements supported by the Context using (Source: filename.ext) or (Source: filename.ext p.N). Do not cite external knowledge.\n- Answer in Markdown.`
+        : `Question:\n${query}\n\nInstructions:\n- You may use general knowledge.\n- If any claim is supported by provided context, cite it; otherwise, no citations.\n- Answer in Markdown.`;
+    } else {
+      system = `You are an expert research assistant.
 
 Grounding
 - Use ONLY the supplied Context block (and "Previous answer excerpt" if present).
@@ -598,9 +621,10 @@ Style
 - Use clear headings and bullets when helpful; use code blocks for code.
 - Be concise and high-signal; avoid repetition.
 - If snippets conflict, note the discrepancy and cite each source.`;
-    const user = contextLines.length
-      ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Base the answer only on the Context above.\n- If info is missing, say so and (optionally) ask one clarifying question.\n- Use citations in the form (Source: filename.ext) or (Source: filename.ext p.N) at sentence end.`
-      : `Question:\n${query}\n\nInstructions:\n- Answer in Markdown.\n- If info is missing, say so.\n- Use citations when applicable.`;
+      user = contextLines.length
+        ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Base the answer only on the Context above.\n- If info is missing, say so and (optionally) ask one clarifying question.\n- Use citations in the form (Source: filename.ext) or (Source: filename.ext p.N) at sentence end.`
+        : `Question:\n${query}\n\nInstructions:\n- Answer in Markdown.\n- If info is missing, say so.\n- Use citations when applicable.`;
+    }
 
     const historyMessages = sanitizeHistory(rawHistory);
     console.log(`[chat] history messages used: ${historyMessages.length}`);
@@ -626,7 +650,7 @@ Style
 // Streaming chat via SSE
 app.post('/api/chat/stream', async (req, res) => {
   try {
-    const { query, history: rawHistory, selectedDocs } = req.body || {};
+    const { query, history: rawHistory, selectedDocs, allowOutsideKnowledge } = req.body || {};
     if (!query) return res.status(400).json({ ok: false, error: 'Missing query' });
 
     // Augment retrieval with last assistant answer excerpt (if any)
@@ -636,11 +660,11 @@ app.post('/api/chat/stream', async (req, res) => {
     const assistantExcerpt = lastAssistant ? lastAssistant.content.slice(0, excerptLen) : '';
     const retrievalQuery = assistantExcerpt ? `${assistantExcerpt} \n\n${query}` : query;
 
-    const results = await searchIndex(retrievalQuery, 6, Array.isArray(selectedDocs) && selectedDocs.length ? selectedDocs : null);
+    const results = await searchIndex(retrievalQuery, 12, Array.isArray(selectedDocs) && selectedDocs.length ? selectedDocs : null);
     const contextLines = results.map(({ item }) => {
       const name = path.basename(item.sourcePath);
       const pageLabel = item.pageNumber ? ` p.${item.pageNumber}` : '';
-      const snippet = item.text.slice(0, 1000);
+      const snippet = item.text.slice(0, 2000);
       return `[src=${name}${pageLabel}#${item.chunkId}] ${snippet}`;
     });
     const historyContext = assistantExcerpt
@@ -648,12 +672,52 @@ app.post('/api/chat/stream', async (req, res) => {
       : '';
     const context = [historyContext, ...contextLines].filter(Boolean).join('\n\n');
 
-    const system = `You are an expert research assistant. Answer using ONLY the provided context. If the answer is not in the snippets, say you don't have enough information.
-    Citations: Use exactly the format (Source: filename.ext p.N). Do not include URLs or paths in citations. Do not invent sources.
-    Respond in Markdown with clear headings, lists, and code blocks when helpful. Be concise.`;
-    const user = contextLines.length
-      ? `Context:\n${context}\n\nQuestion: ${query}\n\nInstructions: Use only the context. If missing info, say so. Cite sources using (Source: filename.ext p.N). Respond in Markdown.`
-      : `Question: ${query}\n\nRespond in Markdown.`;
+    let system;
+    let user;
+    if (allowOutsideKnowledge) {
+      system = `You are an expert research assistant.
+
+Grounding
+- Use the supplied Context block when relevant; you MAY use your general knowledge to fill gaps.
+- If the context is insufficient for the question, answer from your knowledge. Do not fabricate citations.
+
+Citations
+- When a claim is supported by a provided snippet, cite it using: (Source: filename.ext) or (Source: filename.ext p.N).
+- Do not cite external knowledge. Never invent sources or page numbers.
+
+Style
+- Output Markdown.
+- Start with a 1–2 sentence answer, then details.
+- Use clear headings and bullets when helpful; use code blocks for code.
+- Be concise and high-signal; avoid repetition.
+- If snippets conflict, note the discrepancy and cite each source.`;
+      user = contextLines.length
+        ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Prefer the Context above when relevant; you may use general knowledge to fill gaps.\n- Cite only statements supported by the Context using (Source: filename.ext) or (Source: filename.ext p.N). Do not cite external knowledge.\n- Answer in Markdown.`
+        : `Question:\n${query}\n\nInstructions:\n- You may use general knowledge.\n- If any claim is supported by provided context, cite it; otherwise, no citations.\n- Answer in Markdown.`;
+    } else {
+      system = `You are an expert research assistant.
+
+Grounding
+- Use ONLY the supplied Context block (and "Previous answer excerpt" if present).
+- Do NOT use outside knowledge. If the context is insufficient, say: "I don’t have enough information to answer from the provided context." Optionally ask one targeted follow-up.
+
+Citations
+- Cite every claim supported by a snippet.
+- Format citations exactly as: (Source: filename.ext) or (Source: filename.ext p.N) when a page number is shown.
+- Place citations at the end of the sentence(s) they support.
+- If multiple sources support a sentence, include them space-separated, e.g., (Source: a.pdf p.3) (Source: b.md).
+- Never include URLs or paths. Never invent sources or page numbers.
+
+Style
+- Output Markdown.
+- Start with a 1–2 sentence answer, then details.
+- Use clear headings and bullets when helpful; use code blocks for code.
+- Be concise and high-signal; avoid repetition.
+- If snippets conflict, note the discrepancy and cite each source.`;
+      user = contextLines.length
+        ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Base the answer only on the Context above.\n- If info is missing, say so and (optionally) ask one clarifying question.\n- Use citations in the form (Source: filename.ext) or (Source: filename.ext p.N) at sentence end.`
+        : `Question:\n${query}\n\nInstructions:\n- Answer in Markdown.\n- If info is missing, say so.\n- Use citations when applicable.`;
+    }
 
     // SSE headers
     res.setHeader('Content-Type', 'text/event-stream');

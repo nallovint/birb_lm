@@ -50,6 +50,12 @@
       <div class="chat-col">
         <div id="chat"></div>
         <div id="suggestions" style="display:flex; gap:8px; flex-wrap:wrap; margin:10px 0;"></div>
+        <div id="input-options" style="display:flex; align-items:center; gap:8px; margin:6px 0 2px 0;">
+          <label for="allow-outside" style="display:flex; align-items:center; gap:6px; font-size:0.95em;">
+            <input type="checkbox" id="allow-outside" />
+            Allow outside knowledge for this message
+          </label>
+        </div>
         <div class="input">
           <textarea id="query" rows="3" placeholder="Ask a question about your documents..."></textarea>
           <button id="send">Send</button>
