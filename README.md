@@ -10,7 +10,7 @@ A lightweight RAG (Retrieval‑Augmented Generation) web app to chat with docume
 ## Features
 - Indexes `PDF`, `DOCX`, `MD`, and `TXT`
 - Vector embeddings via `@xenova/transformers` (MiniLM)
-- Retrieval‑augmented answers with citations (Source: filename p.N)
+- Retrieval‑augmented answers with inline numeric refs and an end Citations list (📄 filename.ext pg. N)
 - Runtime provider switching; no container restart required
 - Document selection panel locks after first message; defaults persist
 
@@ -57,12 +57,13 @@ docker compose exec ollama ollama pull llama3.1:8b
 ### 6) Chat
 - Chat UI: http://localhost:3000/chat.html
 - Left panel: select documents to include, then “Use selected” (locks after first message)
-- Ask questions; answers cite sources, and suggestions update
+- Ask questions; answers use inline numeric refs (e.g., 1 or [1]) and a Citations list (📄 filename.ext pg. N). Suggestions update as you go
+- Optional: toggle “Allow outside knowledge for this message” above the input to allow general knowledge for just that message; when off, answers are strictly grounded to the selected documents
 - Rebuild progress also appears in the chat header
 
 ## How it works
 - Indexing: PDFs are one chunk per page; other text is word‑window chunked with overlap; embeddings are saved to `storage/index.json`
-- Retrieval: queries are embedded and top‑K chunks are added as context; selection restricts retrieval to chosen docs
+- Retrieval: queries are embedded and top‑K chunks are added as context (default top‑K = 12; per‑snippet cap ≈ 2000 chars). Selection restricts retrieval to chosen docs. Conversation carryover defaults: 12 messages total, ~12000 characters budget
 - Settings: persisted at `storage/settings.json`, read at runtime to switch providers without restart
 
 ## Environment variables (optional)
@@ -84,6 +85,9 @@ The Settings UI covers most needs; envs below tune behavior.
   - `TXT_CHUNK_OVERLAP` (default: 80)
   - `EMBED_YIELD_EVERY_N` (default: 5)
   - `BUILD_YIELD_EVERY_N` (default: 50)
+  - `HISTORY_MAX_MESSAGES` (default: 12)
+  - `HISTORY_CHAR_BUDGET` (default: 12000)
+  - `CHAT_CHUNK_SIZE` (default: 1200; affects stream flush heuristics if enabled — currently disabled to keep responses as a single message)
 
 ## Useful commands
 ```bash
@@ -109,7 +113,7 @@ docker compose exec ollama ollama pull gemma2:2b
 ```
 
 ## Troubleshooting
-- Provider badge shows the wrong provider
+- Provider badge shows the wrong provider / model
   - In Settings, Test Connection → Save Settings; hard refresh chat page
   - Ensure Ollama is up and reachable at the configured URL
 - Uploads fail via browse/drag‑drop
@@ -118,8 +122,10 @@ docker compose exec ollama ollama pull gemma2:2b
 - Rebuild progress seems stuck at “Embedding”
   - Small corpora may finish between polls; try more/larger files
   - Tune `EMBED_YIELD_EVERY_N=1` and `BUILD_YIELD_EVERY_N=10` if needed
-- No results in answers
+- No results in answers or answers seem too limited
   - Rebuild after adding files; ensure correct documents were selected before first message
+  - If you need broader answers, enable “Allow outside knowledge for this message” for that turn
+  - You can increase retrieval breadth by adjusting envs (see defaults above)
 - Ollama issues
   - Check health: `docker compose ps` (should be healthy)
   - List models: `docker compose exec ollama ollama list`
