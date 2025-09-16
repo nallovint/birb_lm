@@ -571,7 +571,7 @@ app.post('/api/chat', async (req, res) => {
       const name = path.basename(item.sourcePath);
       const pageLabel = item.pageNumber ? ` p.${item.pageNumber}` : '';
       const snippet = item.text.slice(0, 2000);
-      return `[src=${name}${pageLabel}#${item.chunkId}] ${snippet}`;
+      return `[src=${name}${pageLabel}] ${snippet}`;
     });
 
     const historyContext = assistantExcerpt
@@ -582,48 +582,34 @@ app.post('/api/chat', async (req, res) => {
     let system;
     let user;
     if (allowOutsideKnowledge) {
-      system = `You are an expert research assistant.
+      system = `You are a research assistant.
 
 Grounding
-- Use the supplied Context block when relevant; you MAY use your general knowledge to fill gaps.
-- If the context is insufficient for the question, answer from your knowledge. Do not fabricate citations.
+- Prefer the provided Context; you MAY use general knowledge to fill gaps. Do not invent citations.
 
 Citations
-- When a claim is supported by a provided snippet, cite it using: (Source: filename.ext) or (Source: filename.ext p.N).
-- Do not cite external knowledge. Never invent sources or page numbers.
+- Add inline <sup>n</sup> (or [n]) after supported sentences.
+- End with a Citations list mapping n → 📄 filename.ext pg. N (or 📄 filename.ext). Use lowercase "pg." exactly. Reuse numbers; multiple sources: <sup>1,2</sup>. No # or anchors.
 
 Style
-- Output Markdown.
-- Start with a 1–2 sentence answer, then details.
-- Use clear headings and bullets when helpful; use code blocks for code.
-- Be concise and high-signal; avoid repetition.
-- If snippets conflict, note the discrepancy and cite each source.`;
+- Markdown. 1–2 sentence summary then details. Headings/bullets/code OK. Be concise. Note conflicts.`;
       user = contextLines.length
-        ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Prefer the Context above when relevant; you may use general knowledge to fill gaps.\n- Cite only statements supported by the Context using (Source: filename.ext) or (Source: filename.ext p.N). Do not cite external knowledge.\n- Answer in Markdown.`
-        : `Question:\n${query}\n\nInstructions:\n- You may use general knowledge.\n- If any claim is supported by provided context, cite it; otherwise, no citations.\n- Answer in Markdown.`;
+        ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Prefer Context; external knowledge allowed.\n- Cite only Context-backed claims with inline numbers and a Citations list.`
+        : `Question:\n${query}\n\nInstructions:\n- External knowledge allowed.\n- Cite Context-backed claims using inline numbers and a Citations list.`;
     } else {
-      system = `You are an expert research assistant.
+      system = `You are a research assistant.
 
 Grounding
-- Use ONLY the supplied Context block (and "Previous answer excerpt" if present).
-- Do NOT use outside knowledge. If the context is insufficient, say: "I don’t have enough information to answer from the provided context." Optionally ask one targeted follow-up.
+- Use ONLY the Context (and Previous answer excerpt). If insufficient, say you lack enough context.
 
 Citations
-- Cite every claim supported by a snippet.
-- Format citations exactly as: (Source: filename.ext) or (Source: filename.ext p.N) when a page number is shown.
-- Place citations at the end of the sentence(s) they support.
-- If multiple sources support a sentence, include them space-separated, e.g., (Source: a.pdf p.3) (Source: b.md).
-- Never include URLs or paths. Never invent sources or page numbers.
+- Inline <sup>n</sup> (or [n]); finish with a Citations list mapping n → 📄 filename.ext pg. N (or 📄 filename.ext). Use lowercase "pg." exactly. No URLs/paths. Do not invent. No # or anchors.
 
 Style
-- Output Markdown.
-- Start with a 1–2 sentence answer, then details.
-- Use clear headings and bullets when helpful; use code blocks for code.
-- Be concise and high-signal; avoid repetition.
-- If snippets conflict, note the discrepancy and cite each source.`;
+- Markdown. Brief first, then details. Headings/bullets/code OK. Be concise. Note conflicts.`;
       user = contextLines.length
-        ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Base the answer only on the Context above.\n- If info is missing, say so and (optionally) ask one clarifying question.\n- Use citations in the form (Source: filename.ext) or (Source: filename.ext p.N) at sentence end.`
-        : `Question:\n${query}\n\nInstructions:\n- Answer in Markdown.\n- If info is missing, say so.\n- Use citations when applicable.`;
+        ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Base the answer only on the Context above.\n- If info is missing, say so and (optionally) ask one clarifying question.\n- For context-supported statements, insert inline references as <sup>n</sup> (or [n]) and add a Citations list at the end mapping numbers to sources in the form: 📄 filename.ext - Pg N (or 📄 filename.ext).`
+        : `Question:\n${query}\n\nInstructions:\n- Answer in Markdown.\n- If info is missing, say so.\n- For context-supported statements, insert inline references as <sup>n</sup> (or [n]) and add a Citations list at the end mapping numbers to sources.`
     }
 
     const historyMessages = sanitizeHistory(rawHistory);
@@ -639,7 +625,7 @@ Style
       { role: 'user', content: user },
     ], { temperature: 0.2, max_tokens: Number(process.env.CHAT_MAX_TOKENS || 2048) });
 
-    const chunks = chunkMarkdown(answer, Number(process.env.CHAT_CHUNK_SIZE || 1200));
+    const chunks = [answer];
     res.json({ ok: true, chunks });
   } catch (e) {
     console.error(e);
@@ -665,7 +651,7 @@ app.post('/api/chat/stream', async (req, res) => {
       const name = path.basename(item.sourcePath);
       const pageLabel = item.pageNumber ? ` p.${item.pageNumber}` : '';
       const snippet = item.text.slice(0, 2000);
-      return `[src=${name}${pageLabel}#${item.chunkId}] ${snippet}`;
+      return `[src=${name}${pageLabel}] ${snippet}`;
     });
     const historyContext = assistantExcerpt
       ? `Previous answer excerpt (for context):\n${assistantExcerpt}`
@@ -675,14 +661,18 @@ app.post('/api/chat/stream', async (req, res) => {
     let system;
     let user;
     if (allowOutsideKnowledge) {
-      system = `You are an expert research assistant.
+      system = `You are a research assistant.
 
 Grounding
 - Use the supplied Context block when relevant; you MAY use your general knowledge to fill gaps.
 - If the context is insufficient for the question, answer from your knowledge. Do not fabricate citations.
 
-Citations
-- When a claim is supported by a provided snippet, cite it using: (Source: filename.ext) or (Source: filename.ext p.N).
+Citations (numbered)
+- Inside the answer, add inline reference markers immediately after the sentence(s) they support as <sup>n</sup>. If HTML is unsuitable, use [n].
+- At the end, add a small-text Citations section listing each reference number and its source, using exactly one of:
+  - 📄 filename.ext - Pg N (when a page number is shown)
+  - 📄 filename.ext (when no page number is shown)
+- Reuse the same number for the same source; for multiple sources for a sentence, use comma-separated numbers, e.g., <sup>1,2</sup>.
 - Do not cite external knowledge. Never invent sources or page numbers.
 
 Style
@@ -690,22 +680,25 @@ Style
 - Start with a 1–2 sentence answer, then details.
 - Use clear headings and bullets when helpful; use code blocks for code.
 - Be concise and high-signal; avoid repetition.
-- If snippets conflict, note the discrepancy and cite each source.`;
+- If snippets conflict, note the discrepancy and cite each source.
+- End with: <div class="citations"><strong>Citations</strong><ol>...items...</ol></div>.`;
       user = contextLines.length
-        ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Prefer the Context above when relevant; you may use general knowledge to fill gaps.\n- Cite only statements supported by the Context using (Source: filename.ext) or (Source: filename.ext p.N). Do not cite external knowledge.\n- Answer in Markdown.`
-        : `Question:\n${query}\n\nInstructions:\n- You may use general knowledge.\n- If any claim is supported by provided context, cite it; otherwise, no citations.\n- Answer in Markdown.`;
+        ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Prefer the Context above when relevant; you may use general knowledge to fill gaps.\n- For context-supported statements, insert inline references as <sup>n</sup> (or [n]) and add a Citations list at the end mapping numbers to sources in the form: 📄 filename.ext - Pg N (or 📄 filename.ext).\n- Do not cite external knowledge.\n- Answer in Markdown.`
+        : `Question:\n${query}\n\nInstructions:\n- You may use general knowledge.\n- If any claim is supported by provided context, insert inline references as <sup>n</sup> (or [n]) and add a Citations list at the end mapping numbers to sources.\n- Answer in Markdown.`;
     } else {
-      system = `You are an expert research assistant.
+      system = `You are a research assistant.
 
 Grounding
 - Use ONLY the supplied Context block (and "Previous answer excerpt" if present).
 - Do NOT use outside knowledge. If the context is insufficient, say: "I don’t have enough information to answer from the provided context." Optionally ask one targeted follow-up.
 
-Citations
+Citations (numbered)
 - Cite every claim supported by a snippet.
-- Format citations exactly as: (Source: filename.ext) or (Source: filename.ext p.N) when a page number is shown.
-- Place citations at the end of the sentence(s) they support.
-- If multiple sources support a sentence, include them space-separated, e.g., (Source: a.pdf p.3) (Source: b.md).
+- Inside the answer, add inline reference markers immediately after the sentence(s) they support as <sup>n</sup>. If HTML is unsuitable, use [n].
+- At the end, add a small-text Citations section listing each reference number and its source, using exactly one of:
+  - 📄 filename.ext - Pg N (when a page number is shown)
+  - 📄 filename.ext (when no page number is shown)
+- Reuse the same number for the same source; for multiple sources, use comma-separated numbers, e.g., <sup>1,2</sup>.
 - Never include URLs or paths. Never invent sources or page numbers.
 
 Style
@@ -713,10 +706,11 @@ Style
 - Start with a 1–2 sentence answer, then details.
 - Use clear headings and bullets when helpful; use code blocks for code.
 - Be concise and high-signal; avoid repetition.
-- If snippets conflict, note the discrepancy and cite each source.`;
+- If snippets conflict, note the discrepancy and cite each source.
+- End with: <div class="citations"><strong>Citations</strong><ol>...items...</ol></div>.`;
       user = contextLines.length
-        ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Base the answer only on the Context above.\n- If info is missing, say so and (optionally) ask one clarifying question.\n- Use citations in the form (Source: filename.ext) or (Source: filename.ext p.N) at sentence end.`
-        : `Question:\n${query}\n\nInstructions:\n- Answer in Markdown.\n- If info is missing, say so.\n- Use citations when applicable.`;
+        ? `Context:\n${context}\n\nQuestion:\n${query}\n\nInstructions:\n- Use only Context; if missing info, say so.\n- Use inline numbers and a Citations list; no external knowledge.`
+        : `Question:\n${query}\n\nInstructions:\n- Use only Context; if missing info, say so.\n- Use inline numbers and a Citations list.`;
     }
 
     // SSE headers
@@ -740,9 +734,7 @@ Style
       console.log(`[chat/stream] history preview:`, preview);
     }
 
-    const chunkLimit = Number(process.env.CHAT_CHUNK_SIZE || 1200);
-    let accForFlush = '';
-    let hasEmittedDelta = false;
+    let acc = '';
 
     await chatCompleteStream(
       [
@@ -753,24 +745,10 @@ Style
       { temperature: 0.2, max_tokens: Number(process.env.CHAT_MAX_TOKENS || 2048) },
       (evt) => {
         if (evt.type === 'delta') {
-          accForFlush += evt.text || '';
+          acc += evt.text || '';
           send('delta', { text: evt.text });
-          hasEmittedDelta = true;
-
-          // Determine if we're inside a fenced code block (``` or ~~~ at start of line)
-          const fences = (accForFlush.match(/(?:^|\n)\s*(?:```|~~~)/g) || []).length;
-          const insideFence = fences % 2 === 1;
-
-          const atSentenceBoundary = /[\.!?]\s*$/.test(accForFlush) || /\n\s*$/.test(accForFlush);
-          if (accForFlush.length >= chunkLimit && atSentenceBoundary && !insideFence) {
-            // Signal the client to finalize current message and start a new one
-            send('flush', { done: false });
-            accForFlush = '';
-          }
         }
         if (evt.type === 'done') {
-          // If nothing was emitted, still send a minimal delta to keep UI consistent
-          if (!hasEmittedDelta) send('delta', { text: '' });
           send('done', {});
         }
         if (evt.type === 'error') send('error', { error: evt.error });

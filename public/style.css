@@ -16,6 +16,11 @@ textarea { flex: 1; border-radius: 8px; border: 1px solid #1d2536; background: #
 .msg.assistant code { background: #0d1320; padding: 2px 4px; border-radius: 4px; }
 .msg.assistant a { color: #8ab4ff; }
 
+/* Citations list styling */
+.msg.assistant .citations { font-size: 0.9em; opacity: 0.9; margin-top: 8px; }
+.msg.assistant .citations ol { margin: 6px 0 0 1.2em; padding: 0; }
+.msg.assistant .citations li { margin: 2px 0; }
+
 /* Responsive three-column layout using percentages */
 .layout { display: grid; grid-template-columns: 20% 1fr 26%; gap: 18px; align-items: start; }
 .layout.no-docs { grid-template-columns: 20% 1fr 26%; }
