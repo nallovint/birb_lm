@@ -147,5 +147,5 @@ Notes:
 - File types and sizes validated on upload
 
 ## License
-MIT (or as provided by your repository)
+CC BY-NC 4.0
 
